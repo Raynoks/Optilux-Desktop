@@ -10,6 +10,7 @@ from auth import hash_password
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "optilux.db")
 ASSETS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
 PRODUCT_IMAGES_DIR = os.path.join(ASSETS_DIR, "products")
+FACTURE_FILES_DIR = os.path.join(ASSETS_DIR, "factures_stockees")
 
 
 def get_connection():
@@ -112,6 +113,17 @@ CREATE TABLE IF NOT EXISTS commandes (
     date_prevue TEXT,
     statut TEXT DEFAULT 'En attente'
 );
+
+CREATE TABLE IF NOT EXISTS factures (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    type TEXT DEFAULT 'client',
+    titre TEXT,
+    date TEXT,
+    montant REAL DEFAULT 0,
+    fichier_path TEXT,
+    notes TEXT,
+    sale_id INTEGER REFERENCES sales(id) ON DELETE SET NULL
+);
 """
 
 # Colonnes ajoutées après la version initiale — appliquées via ALTER TABLE (idempotent,
@@ -204,6 +216,7 @@ def init_db():
         _seed_types(conn, only_if_empty=True)
     conn.close()
     os.makedirs(PRODUCT_IMAGES_DIR, exist_ok=True)
+    os.makedirs(FACTURE_FILES_DIR, exist_ok=True)
 
 
 def _seed_types(conn, only_if_empty=False):

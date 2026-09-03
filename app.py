@@ -12,8 +12,10 @@ import subprocess
 import uuid
 
 from database import (init_db, get_connection, log_action, DB_PATH, get_setting, set_setting,
-                       get_types, add_type, delete_type, DISCOUNT_OPTIONS, PRODUCT_IMAGES_DIR)
+                       get_types, add_type, delete_type, DISCOUNT_OPTIONS, PRODUCT_IMAGES_DIR,
+                       FACTURE_FILES_DIR)
 from notifications import notify
+from whatsapp import send_whatsapp, normalize_phone
 
 ASSETS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
 ICON_ICO = os.path.join(ASSETS_DIR, "optilux.ico")
@@ -125,12 +127,12 @@ def apply_theme(name):
     TABLE_LOW, TABLE_HOVER = t["table_low"], t["table_hover"]
     THEME_NAME = name
 
-FONT_DISPLAY = ("Georgia", 20, "bold")
-FONT_DISPLAY_SM = ("Georgia", 14, "bold")
-FONT_BODY = ("Segoe UI", 10)
-FONT_BODY_B = ("Segoe UI", 10, "bold")
-FONT_MONO = ("Consolas", 9)
-FONT_MONO_SM = ("Consolas", 8)
+FONT_DISPLAY = ("Georgia", 25, "bold")
+FONT_DISPLAY_SM = ("Georgia", 18, "bold")
+FONT_BODY = ("Segoe UI", 13)
+FONT_BODY_B = ("Segoe UI", 13, "bold")
+FONT_MONO = ("Consolas", 11)
+FONT_MONO_SM = ("Consolas", 11)
 
 def CATEGORIES_STOCK(): return get_types("stock_categorie")
 def MARQUES_STOCK(): return get_types("stock_marque")
@@ -234,7 +236,7 @@ def setup_style(root):
     except tk.TclError:
         pass
     style.configure("Treeview", background=SURFACE, fieldbackground=SURFACE, foreground=TEXT,
-                     rowheight=30, font=FONT_BODY, borderwidth=0)
+                     rowheight=38, font=FONT_BODY, borderwidth=0)
     style.configure("Treeview.Heading", background=CONTENT_BG, foreground=SLATE,
                      font=FONT_MONO_SM, borderwidth=0, relief="flat")
     style.map("Treeview.Heading", background=[("active", CONTENT_BG)])
@@ -870,6 +872,20 @@ class OptiluxApp(tk.Tk):
             print("Erreur vérification notifications:", e)
         self._notify_job = self.after(self.NOTIFY_INTERVAL_MS, self._run_notification_checks)
 
+    @staticmethod
+    def find_client_phone(client_nom):
+        """Les rendez-vous stockent le nom du client en texte libre (pas de lien direct
+        vers la fiche client) — on retrouve son téléphone par correspondance de nom."""
+        if not client_nom:
+            return None
+        conn = get_connection()
+        row = conn.execute(
+            "SELECT tel FROM clients WHERE TRIM(nom || ' ' || COALESCE(prenom,'')) = ? OR nom = ?",
+            (client_nom.strip(), client_nom.strip())
+        ).fetchone()
+        conn.close()
+        return row["tel"] if row and row["tel"] else None
+
     def _check_appointment_reminders(self):
         now = datetime.datetime.now()
         conn = get_connection()
@@ -889,6 +905,11 @@ class OptiluxApp(tk.Tk):
                 notify("Rendez-vous à venir",
                        f"{a['client_nom']} à {a['heure']} — {a['service']}",
                        icon_path=ICON_ICO)
+                phone = self.find_client_phone(a["client_nom"])
+                if phone:
+                    msg = (f"Bonjour {a['client_nom']}, un rappel de votre rendez-vous "
+                           f"chez OPTILUX aujourd'hui à {a['heure']} ({a['service']}). À bientôt !")
+                    send_whatsapp(phone, msg)
                 self._notified_appointments.add(a["id"])
 
     def _check_expense_reminders(self):
@@ -1118,7 +1139,7 @@ class MainFrame(tk.Frame):
         self.app = app
 
         # ---------------- sidebar ----------------
-        sidebar = tk.Frame(self, bg=INK, width=220)
+        sidebar = tk.Frame(self, bg=INK, width=248)
         sidebar.pack(side="left", fill="y")
         sidebar.pack_propagate(False)
 
@@ -1138,6 +1159,7 @@ class MainFrame(tk.Frame):
             ("stock", "Stock", "box", False),
             ("sales", "Ventes", "sales", False),
             ("commandes", "Commandes", "package", False),
+            ("factures", "Factures", "document", False),
             ("expenses", "Dépenses", "wallet", True),
             ("types", "Types & Produits", "gear", True),
             ("users", "Utilisateurs", "users", True),
@@ -1183,6 +1205,7 @@ class MainFrame(tk.Frame):
             "stock": StockPage,
             "sales": SalesPage,
             "commandes": CommandesPage,
+            "factures": FacturesPage,
         }
         if app.is_admin():
             page_classes["expenses"] = ExpensesPage
@@ -1482,13 +1505,22 @@ class DashboardPage(BasePage):
         avances = sum(s["avance"] or 0 for s in month_sales)
         all_sales = conn.execute("SELECT * FROM sales").fetchall()
         credit = sum((s["vente"] or 0) - (s["avance"] or 0) for s in all_sales)
-        month_exp = conn.execute("SELECT * FROM expenses WHERE date LIKE ?", (ym + "%",)).fetchall()
+        month_exp = conn.execute("SELECT * FROM expenses WHERE date LIKE ? AND personnelle=0", (ym + "%",)).fetchall()
         charges = sum(x["montant"] or 0 for x in month_exp)
         dispo = avances - charges
 
         today = today_iso()
         today_appts = conn.execute("SELECT * FROM appointments WHERE date=? ORDER BY heure", (today,)).fetchall()
         low_stock = conn.execute("SELECT * FROM stock WHERE qte<=seuil").fetchall()
+
+        commandes_rows = conn.execute("""SELECT commandes.*, clients.nom as client_nom, clients.prenom as client_prenom
+                                          FROM commandes LEFT JOIN clients ON clients.id = commandes.client_id
+                                          WHERE statut NOT IN ('Livrée','Annulée')""").fetchall()
+        commande_alerts = [c for c in commandes_rows if CommandesPage.alert_state(c)]
+        commande_alerts.sort(key=lambda c: c["date_prevue"] or "")
+
+        recent_factures = conn.execute("SELECT * FROM factures ORDER BY date DESC LIMIT 4").fetchall() \
+            if self.app.is_admin() else []
         conn.close()
 
         if self.app.is_admin():
@@ -1499,40 +1531,61 @@ class DashboardPage(BasePage):
             self._kpi(kpi_row, "Crédit (reste)", money(credit), accent=True, icon="clock")
             self._kpi(kpi_row, "Charges fixes (mois)", money(charges), icon="document")
 
-            lower = tk.Frame(self, bg=CONTENT_BG)
-            lower.pack(fill="x")
-            dispo_card = tk.Frame(lower, bg=SURFACE, highlightbackground=BORDER, highlightthickness=1, padx=20, pady=18)
-            dispo_card.pack(side="left", fill="both", expand=True, padx=(0, 10), anchor="n")
-            self._card_title(dispo_card, "Disponible net", "growth")
-            tk.Label(dispo_card, text="Avances − Charges fixes", font=FONT_MONO_SM, bg=SURFACE, fg=SLATE).pack(anchor="w", pady=(0, 10))
-            tk.Label(dispo_card, text=money(dispo), font=FONT_DISPLAY, bg=SURFACE, fg=RED).pack(anchor="w")
-        else:
-            lower = tk.Frame(self, bg=CONTENT_BG)
-            lower.pack(fill="x")
+        # ---- cartes du bas : 2 par rangée (plus de place pour le texte agrandi) ----
+        card_specs = []
+        if self.app.is_admin():
+            card_specs.append(("Disponible net", "growth", lambda card: self._build_dispo(card, dispo)))
+        card_specs.append(("Rendez-vous aujourd'hui", "calendar", lambda card: self._build_list(
+            card, today_appts, "Aucun rendez-vous aujourd'hui.",
+            lambda a: (f"{a['heure']} — {a['client_nom']}", a["statut"], SLATE))))
+        card_specs.append(("Alertes stock", "warning", lambda card: self._build_list(
+            card, low_stock, "Tout le stock est suffisant.",
+            lambda s: (s["nom"], f"{s['qte']} restant(s)", RED))))
+        card_specs.append(("Commandes à suivre", "package", lambda card: self._build_list(
+            card, commande_alerts[:6], "Aucune commande urgente.",
+            lambda c: (
+                ((c["fournisseur"] if (c["type"] or "client") == "fournisseur"
+                  else f"{c['client_nom'] or ''} {c['client_prenom'] or ''}".strip()) or "—")
+                + (f" — {c['description']}" if c["description"] else ""),
+                "EN RETARD" if CommandesPage.alert_state(c) == "overdue" else "BIENTÔT", RED))))
+        if self.app.is_admin():
+            card_specs.append(("Factures récentes", "document", lambda card: self._build_list(
+                card, recent_factures, "Aucune facture enregistrée.",
+                lambda f: (f["titre"] or "—", money(f["montant"]), SLATE))))
 
-        rdv_card = tk.Frame(lower, bg=SURFACE, highlightbackground=BORDER, highlightthickness=1, padx=20, pady=18)
-        rdv_card.pack(side="left", fill="both", expand=True, padx=10, anchor="n")
-        self._card_title(rdv_card, "Rendez-vous aujourd'hui", "calendar")
-        if today_appts:
-            for a in today_appts:
-                r = tk.Frame(rdv_card, bg=SURFACE)
-                r.pack(fill="x", pady=2)
-                tk.Label(r, text=f"{a['heure']} — {a['client_nom']}", font=FONT_MONO_SM, bg=SURFACE, fg=TEXT).pack(side="left")
-                tk.Label(r, text=a["statut"], font=FONT_MONO_SM, bg=SURFACE, fg=SLATE).pack(side="right")
-        else:
-            tk.Label(rdv_card, text="Aucun rendez-vous aujourd'hui.", font=FONT_MONO_SM, bg=SURFACE, fg=SLATE).pack(anchor="w")
+        grid_wrap = tk.Frame(self, bg=CONTENT_BG)
+        grid_wrap.pack(fill="both", expand=True)
+        grid_wrap.grid_columnconfigure(0, weight=1)
+        grid_wrap.grid_columnconfigure(1, weight=1)
+        for i, (title, icon, builder) in enumerate(card_specs):
+            row, col = divmod(i, 2)
+            card = tk.Frame(grid_wrap, bg=SURFACE, highlightbackground=BORDER, highlightthickness=1, padx=20, pady=18)
+            card.grid(row=row, column=col, sticky="nsew",
+                      padx=(0, 8) if col == 0 else (8, 0), pady=(0, 16))
+            self._card_title(card, title, icon)
+            builder(card)
 
-        stock_card = tk.Frame(lower, bg=SURFACE, highlightbackground=BORDER, highlightthickness=1, padx=20, pady=18)
-        stock_card.pack(side="left", fill="both", expand=True, padx=(10, 0), anchor="n")
-        self._card_title(stock_card, "Alertes stock", "warning")
-        if low_stock:
-            for s in low_stock:
-                r = tk.Frame(stock_card, bg=SURFACE)
-                r.pack(fill="x", pady=2)
-                tk.Label(r, text=s["nom"], font=FONT_MONO_SM, bg=SURFACE, fg=TEXT).pack(side="left")
-                tk.Label(r, text=f"{s['qte']} restant(s)", font=FONT_MONO_SM, bg=SURFACE, fg=RED).pack(side="right")
-        else:
-            tk.Label(stock_card, text="Tout le stock est suffisant.", font=FONT_MONO_SM, bg=SURFACE, fg=SLATE).pack(anchor="w")
+    def _build_dispo(self, card, dispo):
+        tk.Label(card, text="Avances − Charges fixes", font=FONT_MONO_SM, bg=SURFACE, fg=SLATE).pack(anchor="w", pady=(0, 10))
+        tk.Label(card, text=money(dispo), font=FONT_DISPLAY, bg=SURFACE, fg=RED).pack(anchor="w")
+
+    def _build_list(self, card, rows, empty_text, row_fn):
+        """Affiche jusqu'à N lignes ; le nom passe au-dessus du statut si la ligne est
+        trop longue pour tenir sur une seule ligne à cette taille de police."""
+        if not rows:
+            tk.Label(card, text=empty_text, font=FONT_MONO_SM, bg=SURFACE, fg=SLATE).pack(anchor="w")
+            return
+        for item in rows:
+            label_txt, status_txt, status_color = row_fn(item)
+            r = tk.Frame(card, bg=SURFACE)
+            r.pack(fill="x", pady=3)
+            if len(label_txt) > 26:
+                tk.Label(r, text=label_txt, font=FONT_MONO_SM, bg=SURFACE, fg=TEXT, anchor="w",
+                          wraplength=420, justify="left").pack(fill="x")
+                tk.Label(r, text=status_txt, font=FONT_MONO_SM, bg=SURFACE, fg=status_color, anchor="w").pack(fill="x")
+            else:
+                tk.Label(r, text=label_txt, font=FONT_MONO_SM, bg=SURFACE, fg=TEXT).pack(side="left")
+                tk.Label(r, text=status_txt, font=FONT_MONO_SM, bg=SURFACE, fg=status_color).pack(side="right")
 
     def _card_title(self, parent, text, icon_name):
         icon = get_icon(icon_name, RED, size=17)
@@ -1816,6 +1869,30 @@ class AppointmentsPage(BasePage):
         btns.pack(fill="x", pady=(8, 0))
         outline_button(btns, "Modifier la sélection", lambda: self.open_form(self._selected_id()), icon="edit").pack(side="left")
         danger_button(btns, "Supprimer", self.delete_selected).pack(side="left", padx=(0, 12))
+        outline_button(btns, "Envoyer rappel WhatsApp", self.send_whatsapp_reminder, icon="bell").pack(side="left")
+
+    def send_whatsapp_reminder(self):
+        aid = self._selected_id()
+        if not aid:
+            messagebox.showinfo("Info", "Sélectionnez un rendez-vous.")
+            return
+        conn = get_connection()
+        a = conn.execute("SELECT * FROM appointments WHERE id=?", (aid,)).fetchone()
+        conn.close()
+        phone = self.app.find_client_phone(a["client_nom"])
+        if not phone:
+            messagebox.showwarning("Pas de numéro",
+                                    f"Aucun numéro de téléphone trouvé pour « {a['client_nom']} » "
+                                    "dans sa fiche client.")
+            return
+        msg = (f"Bonjour {a['client_nom']}, un rappel de votre rendez-vous chez OPTILUX "
+               f"le {a['date']} à {a['heure']} ({a['service']}). À bientôt !")
+        sent = send_whatsapp(phone, msg)
+        if sent:
+            log_action(self.app.current_user["username"], f"Rappel WhatsApp envoyé : {a['client_nom']}")
+            messagebox.showinfo("En cours d'envoi",
+                                 "WhatsApp Web va s'ouvrir dans votre navigateur pour envoyer le message.\n\n"
+                                 "Assurez-vous d'être déjà connecté à WhatsApp Web (une seule fois, par QR code).")
 
     def _selected_id(self):
         sel = self.tree.selection()
@@ -1923,7 +2000,7 @@ class StockPage(BasePage):
             iid = str(s["id"])
             tag = "low" if low else ("even" if n % 2 == 0 else "odd")
             self.tree.insert("", "end", iid=iid, tags=(tag,),
-                              values=("🖼" if s["image_path"] else "—", s["nom"], s["categorie"], s["marque"], s["qte"],
+                              values=("Oui" if s["image_path"] else "—", s["nom"], s["categorie"], s["marque"], s["qte"],
                                       money(s["prix_vente"]), "STOCK BAS" if low else "OK"))
             n += 1
 
@@ -2086,6 +2163,7 @@ class SalesPage(BasePage):
         outline_button(btns, "Modifier la sélection", lambda: self.open_form(self._selected_id()), icon="edit").pack(side="left")
         danger_button(btns, "Supprimer", self.delete_selected).pack(side="left", padx=(0, 12))
         outline_button(btns, "Facture PDF", self.print_facture, icon="document").pack(side="left", padx=(0, 12))
+        outline_button(btns, "Facture Word", self.print_facture_docx, icon="document").pack(side="left")
 
     def _selected_id(self):
         sel = self.tree.selection()
@@ -2231,6 +2309,12 @@ class SalesPage(BasePage):
         modal.buttons(save)
 
     def print_facture(self):
+        self._generate_and_store_facture(generate_facture_pdf, "PDF", "Impossible de générer le PDF")
+
+    def print_facture_docx(self):
+        self._generate_and_store_facture(generate_facture_docx, "Word", "Impossible de générer le document Word")
+
+    def _generate_and_store_facture(self, generator_fn, format_label, error_prefix):
         sid = self._selected_id()
         if not sid:
             messagebox.showinfo("Info", "Sélectionnez une vente pour générer la facture.")
@@ -2242,11 +2326,24 @@ class SalesPage(BasePage):
                            (s["client_id"],)).fetchone() if c else None
         conn.close()
         try:
-            path = generate_facture_pdf(s, c, rx)
+            path = generator_fn(s, c, rx)
         except Exception as e:
-            messagebox.showerror("Erreur", f"Impossible de générer le PDF :\n{e}")
+            messagebox.showerror("Erreur", f"{error_prefix} :\n{e}")
             return
-        log_action(self.app.current_user["username"], f"Facture générée : {c['nom'] if c else '?'}")
+        client_label = f"{c['nom']} {c['prenom'] or ''}".strip() if c else "Client"
+        conn = get_connection()
+        existing = conn.execute("SELECT id FROM factures WHERE sale_id=? AND fichier_path=?",
+                                 (sid, path)).fetchone()
+        if existing:
+            conn.execute("UPDATE factures SET titre=?, date=?, montant=? WHERE id=?",
+                         (f"{client_label} ({format_label})", today_iso(), s["vente"], existing["id"]))
+        else:
+            conn.execute("""INSERT INTO factures (type,titre,date,montant,fichier_path,sale_id)
+                             VALUES (?,?,?,?,?,?)""",
+                         ("client", f"{client_label} ({format_label})", today_iso(), s["vente"], path, sid))
+        conn.commit()
+        conn.close()
+        log_action(self.app.current_user["username"], f"Facture {format_label} générée : {c['nom'] if c else '?'}")
         open_file(path)
 
 
@@ -2254,6 +2351,10 @@ def generate_facture_pdf(sale, client, rx):
     from reportlab.lib.pagesizes import A4
     from reportlab.pdfgen import canvas
     from reportlab.lib.units import mm
+    from reportlab.lib.colors import HexColor
+
+    RED_C = HexColor("#D6293B")
+    BLACK_C = HexColor("#0B0B0C")
 
     out_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "factures")
     os.makedirs(out_dir, exist_ok=True)
@@ -2263,65 +2364,412 @@ def generate_facture_pdf(sale, client, rx):
 
     c = canvas.Canvas(path, pagesize=A4)
     w, h = A4
-    y = h - 30 * mm
 
-    c.setFont("Helvetica-Bold", 11)
-    c.drawRightString(w - 20 * mm, y, f"Facture N° {sale['id']} / {sale['date'][:4]}")
-    c.setFont("Helvetica-Oblique", 9)
-    c.drawRightString(w - 20 * mm, y - 14, "OPTICIENNE – OPTOMETRISTE")
-    c.setFont("Helvetica-Bold", 13)
-    c.drawRightString(w - 20 * mm, y - 30, "HAOURIR Sanae")
+    def draw_logo(x, y, align="left"):
+        """Petit pictogramme lunettes + mot-symbole OPTILUX, comme sur le papier à en-tête."""
+        r = 3.6 * mm
+        gap = 1.6 * mm
+        if align == "right":
+            cx2 = x
+            cx1 = cx2 - 2 * r - gap
+        else:
+            cx1 = x
+            cx2 = cx1 + 2 * r + gap
+        c.setLineWidth(1)
+        c.setStrokeColor(BLACK_C)
+        c.circle(cx1, y, r, stroke=1, fill=0)
+        c.setStrokeColor(RED_C)
+        c.circle(cx2, y, r, stroke=1, fill=0)
+        c.setStrokeColor(BLACK_C)
+        c.line(cx1 + r * 0.4, y + r * 0.3, cx2 - r * 0.4, y + r * 0.3)
+        text_x = (cx2 + r + 2 * mm) if align == "left" else (cx1 - r - 2 * mm)
+        c.setFont("Helvetica-Bold", 13)
+        if align == "left":
+            c.setFillColor(BLACK_C)
+            c.drawString(text_x, y - 4, "OPTI")
+            optiw = c.stringWidth("OPTI", "Helvetica-Bold", 13)
+            c.setFillColor(RED_C)
+            c.drawString(text_x + optiw, y - 4, "LUX")
+        else:
+            c.setFillColor(RED_C)
+            luxw = c.stringWidth("LUX", "Helvetica-Bold", 13)
+            c.drawString(text_x - luxw, y - 4, "LUX")
+            c.setFillColor(BLACK_C)
+            optiw = c.stringWidth("OPTI", "Helvetica-Bold", 13)
+            c.drawString(text_x - luxw - optiw, y - 4, "OPTI")
+        c.setFillColor(BLACK_C)
 
-    y -= 55
+    # ---------- en-tête ----------
+    top_y = h - 18 * mm
+    draw_logo(20 * mm, top_y, align="left")
+    draw_logo(w - 20 * mm, top_y, align="right")
+
+    year = (sale["date"] or today_iso())[:4]
+    c.setFont("Helvetica-Bold", 14)
+    c.setFillColor(RED_C)
+    label = "Facture N° "
+    label_w = c.stringWidth(label, "Helvetica-Bold", 14)
+    num_str = f"{sale['id']}"
+    num_w = c.stringWidth(num_str, "Helvetica-Bold", 14)
+    suffix = f" / {year}"
+    suffix_w = c.stringWidth(suffix, "Helvetica-Bold", 14)
+    total_w = label_w + num_w + suffix_w
+    start_x = w / 2 - total_w / 2
+    c.drawString(start_x, top_y - 2, label)
+    c.setFillColor(BLACK_C)
+    c.drawString(start_x + label_w, top_y - 2, num_str)
+    c.drawString(start_x + label_w + num_w, top_y - 2, suffix)
+
     c.setFont("Helvetica", 10)
-    c.drawString(20 * mm, y, f"Tanger le : {sale['date']}")
-    y -= 20
-    nom_complet = f"{client['nom']} {client['prenom'] or ''}".strip() if client else "—"
-    c.drawString(20 * mm, y, f"Mr / Mme / Mlle : {nom_complet}")
-    if sale["paiement"]:
-        c.drawString(140 * mm, y, f"Paiement : {sale['paiement']}")
+    c.drawCentredString(w / 2, top_y - 16, "OPTICIENNE - OPTOMETRISTE")
+    c.setFont("Helvetica-Bold", 12)
+    c.drawCentredString(w / 2, top_y - 32, "HAOURIR Sanae")
 
-    y -= 30
+    date_str = sale["date"] or today_iso()
+    try:
+        yyyy, mm_, dd = date_str.split("-")
+    except ValueError:
+        yyyy, mm_, dd = year, "", ""
+    c.setFont("Helvetica", 10)
+    c.drawCentredString(w / 2, top_y - 46, f"Tanger le : {dd} / {mm_} / {yyyy}")
+
+    # ---------- client ----------
+    y = top_y - 64
+    nom_complet = f"{client['nom']} {client['prenom'] or ''}".strip() if client else ""
+    c.setFont("Helvetica", 10)
+    c.drawString(20 * mm, y, "Mr – Mme – Mlle : ")
+    prefix_w = c.stringWidth("Mr – Mme – Mlle : ", "Helvetica", 10)
+    c.line(20 * mm + prefix_w, y - 1, w - 20 * mm, y - 1)
     c.setFont("Helvetica-Bold", 10)
-    c.drawString(20 * mm, y, "CORRECTION")
-    c.setFont("Helvetica", 9)
-    y -= 14
-    if rx:
-        od = f"OD  Sph : {rx['od_sph'] or '---'} ({rx['od_cyl'] or '---'}) {rx['od_axe'] or ''}"
-        og = f"OG  Sph : {rx['og_sph'] or '---'} ({rx['og_cyl'] or '---'}) {rx['og_axe'] or ''}"
-    else:
-        od, og = "OD  ----------------", "OG  ----------------"
-    c.drawString(24 * mm, y, od); y -= 14
-    c.drawString(24 * mm, y, og)
+    c.drawString(20 * mm + prefix_w + 2, y + 1, nom_complet)
 
-    y -= 30
+    # ---------- Vision de LOIN / ADD Vision de PRES ----------
+    y -= 10 * mm
+    box_h = 22 * mm
+    box_w = (w - 40 * mm - 6 * mm) / 2
+    box1_x = 20 * mm
+    box2_x = box1_x + box_w + 6 * mm
+
+    def vision_box(x, title, od_val, og_val):
+        c.setLineWidth(1)
+        c.setStrokeColor(BLACK_C)
+        c.rect(x, y - box_h, box_w, box_h)
+        c.line(x, y - 8 * mm, x + box_w, y - 8 * mm)
+        c.setFont("Helvetica-Bold", 10)
+        c.drawCentredString(x + box_w / 2, y - 5.5 * mm, title)
+        c.setFont("Helvetica-Bold", 9)
+        c.drawString(x + 3 * mm, y - 13.5 * mm, "OD :")
+        c.drawString(x + 3 * mm, y - 19.5 * mm, "OG :")
+        c.setFont("Helvetica", 9)
+        c.drawString(x + 12 * mm, y - 13.5 * mm, od_val or "")
+        c.drawString(x + 12 * mm, y - 19.5 * mm, og_val or "")
+        c.line(x + 11 * mm, y - 14.3 * mm, x + box_w - 3 * mm, y - 14.3 * mm)
+        c.line(x + 11 * mm, y - 20.3 * mm, x + box_w - 3 * mm, y - 20.3 * mm)
+
+    def fmt_loin(sph, cyl, axe):
+        if not sph and not cyl and not axe:
+            return ""
+        return f"{sph or '---'} ({cyl or '---'}) {axe or ''}".strip()
+
+    loin_od = fmt_loin(rx["od_sph"], rx["od_cyl"], rx["od_axe"]) if rx else ""
+    loin_og = fmt_loin(rx["og_sph"], rx["og_cyl"], rx["og_axe"]) if rx else ""
+    pres_od = (rx["od_add"] or "") if rx else ""
+    pres_og = (rx["og_add"] or "") if rx else ""
+
+    vision_box(box1_x, "Vision de LOIN", loin_od, loin_og)
+    vision_box(box2_x, "ADD Vision de PRES", pres_od, pres_og)
+
+    # ---------- VL / VP / PROGRESSIF ----------
+    y -= box_h + 10 * mm
+
+    def checkbox(x, label, checked):
+        size = 3.6 * mm
+        c.setFont("Helvetica-Bold", 10)
+        c.setFillColor(BLACK_C)
+        c.drawString(x, y - 2.6, label)
+        box_x = x + c.stringWidth(label, "Helvetica-Bold", 10) + 2
+        c.setLineWidth(1)
+        c.rect(box_x, y - 3, size, size)
+        if checked:
+            c.line(box_x, y - 3, box_x + size, y - 3 + size)
+            c.line(box_x, y - 3 + size, box_x + size, y - 3)
+        return box_x + size
+
+    vl_checked = bool(rx["vl"]) if rx else False
+    vp_checked = bool(rx["vp"]) if rx else False
+    pg_checked = bool(rx["pg"]) if rx else False
+    cx = w / 2 - 45 * mm
+    cx = checkbox(cx, "VL", vl_checked) + 14 * mm
+    cx = checkbox(cx, "VP", vp_checked) + 14 * mm
+    checkbox(cx, "PROGRESSIF", pg_checked)
+
+    # ---------- table Désignation / Prix unité / Montant TTC ----------
+    y -= 12 * mm
+    table_top = y
+    col1_w = (w - 40 * mm) * 0.62
+    col2_w = (w - 40 * mm) * 0.19
+    col3_w = (w - 40 * mm) * 0.19
+    x0 = 20 * mm
+    x1 = x0 + col1_w
+    x2 = x1 + col2_w
+    x3 = x2 + col3_w
+    header_h = 10 * mm
+    rows_h = 24 * mm
+    bottom_h = 20 * mm
+    total_table_h = header_h + rows_h + bottom_h
+
+    c.setLineWidth(1)
+    c.rect(x0, table_top - total_table_h, x3 - x0, total_table_h)
+    c.line(x0, table_top - header_h, x3, table_top - header_h)
+    c.line(x0, table_top - header_h - rows_h, x3, table_top - header_h - rows_h)
+    c.line(x1, table_top, x1, table_top - total_table_h)
+    c.line(x2, table_top, x2, table_top - total_table_h)
+
+    c.setFont("Helvetica-Bold", 9)
+    c.drawCentredString((x0 + x1) / 2, table_top - 6.5 * mm, "Désignation")
+    c.drawCentredString((x1 + x2) / 2, table_top - 6.5 * mm, "Prix unité")
+    c.drawCentredString((x2 + x3) / 2, table_top - 6.5 * mm, "Montant TTC")
+
+    verres_desc = (rx["verres_texte"] if rx and rx["verres_texte"] else "") or "correcteurs organiques antireflet"
+    c.setFont("Helvetica", 9)
+    c.drawString(x0 + 3 * mm, table_top - header_h - 7 * mm, "-   Monture optique.")
+    c.drawString(x0 + 3 * mm, table_top - header_h - 15 * mm, f"-   Verres correcteurs : {verres_desc}")
+
+    c.setFont("Helvetica", 9)
+    c.drawCentredString((x1 + x2) / 2, table_top - header_h - 7 * mm, f"{sale['monture']:.0f},00")
+    c.drawCentredString((x2 + x3) / 2, table_top - header_h - 7 * mm, f"{sale['monture']:.0f},00")
+    c.drawCentredString((x1 + x2) / 2, table_top - header_h - 19 * mm, f"{sale['verres']:.0f},00")
+    c.drawCentredString((x2 + x3) / 2, table_top - header_h - 19 * mm, f"{sale['verres']:.0f},00")
+
+    bottom_y = table_top - header_h - rows_h
+    c.setFont("Helvetica-Bold", 9)
+    c.drawString(x0 + 3 * mm, bottom_y - 7 * mm, "Cachet et signature :")
+    c.drawCentredString((x1 + x2) / 2, bottom_y - 7 * mm, "TOTAL")
+    c.drawCentredString((x1 + x2) / 2, bottom_y - 13 * mm, "TTC")
+    remise_txt = f" (-{sale['remise']}%)" if sale["remise"] else ""
     c.setFont("Helvetica-Bold", 10)
-    c.rect(20 * mm, y - 40, w - 40 * mm, 40)
-    c.drawString(24 * mm, y - 12, "Désignation")
-    c.drawString(110 * mm, y - 12, "Prix unité")
-    c.drawString(150 * mm, y - 12, "Montant TTC")
-    c.setFont("Helvetica", 8)
-    c.drawString(24 * mm, y - 26, "Monture optique. Verres correcteurs organiques antireflet.")
-    c.drawString(110 * mm, y - 26, f"{sale['monture']:.0f},00 / {sale['verres']:.0f},00")
-    c.drawString(150 * mm, y - 26, f"{sale['monture']:.0f},00 / {sale['verres']:.0f},00")
+    c.drawCentredString((x2 + x3) / 2, bottom_y - 10 * mm, f"{sale['vente']:.0f},00")
+    if remise_txt:
+        c.setFont("Helvetica", 7)
+        c.drawCentredString((x2 + x3) / 2, bottom_y - 16 * mm, remise_txt.strip())
 
-    y -= 55
-    c.setFont("Helvetica-Bold", 11)
-    remise_txt = f"  (Remise {sale['remise']}%)" if sale["remise"] else ""
-    c.drawString(20 * mm, y, f"TOTAL TTC : {sale['vente']:.0f},00 DH{remise_txt}")
-
-    y -= 24
-    c.setFont("Helvetica", 9)
+    # ---------- montant en toutes lettres ----------
+    y = table_top - total_table_h - 12 * mm
     words = num_to_french_words(sale["vente"]).upper()
-    c.drawString(20 * mm, y, f"Arrêtée la présente facture à la somme de : {words} DIRHAMS.")
+    c.setFont("Helvetica-Bold", 10)
+    c.drawString(20 * mm, y, "\u2713  Arrêtée la présente facture à la somme de : ")
+    prefix_w = c.stringWidth("\u2713  Arrêtée la présente facture à la somme de : ", "Helvetica-Bold", 10)
+    c.setFont("Helvetica", 10)
+    c.drawString(20 * mm + prefix_w, y, f"{words} DIRHAMS.")
+    c.line(20 * mm, y - 8, w - 20 * mm, y - 8)
 
-    y -= 40
+    y -= 20
+    c.setFont("Helvetica-Oblique", 8)
+    c.drawCentredString(w / 2, y, "NB : Tous les montants sont exprimés en Dirhams.")
+
+    # ---------- pied de page ----------
+    y -= 16
+    c.setLineWidth(1)
+    c.rect(20 * mm, y - 18, w - 40 * mm, 18)
     c.setFont("Helvetica", 7)
-    footer = ("Adresse : VIENNA MALL - B1 angle Moutanabi et Ahmed Chawki - RDC N°04 - TANGER   "
-              "RC : 148206 / PATENTE : 50405209 / IF : 24813627 / ICE : 001962144000020 / TEL : 0649 24 94 24")
-    c.drawCentredString(w / 2, 20 * mm, footer)
+    c.drawCentredString(w / 2, y - 8,
+                         "ADRESSE : VIENNA MALL - B1 angle Moutanabi et Ahmed chawki - RDC N°04 - TANGER")
+    c.drawCentredString(w / 2, y - 15,
+                         "RC: 148206 / PATENTE: 50405209 / IF: 24813627 / ICE: 001962144000020 / NUM : 06 49 24 94 24")
 
     c.save()
+    return path
+
+
+def generate_facture_docx(sale, client, rx):
+    from docx import Document
+    from docx.shared import Pt, Mm, RGBColor
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.enum.table import WD_TABLE_ALIGNMENT
+    from docx.oxml.ns import qn
+    from docx.oxml import OxmlElement
+
+    RED_RGB = RGBColor(0xD6, 0x29, 0x3B)
+    BLACK_RGB = RGBColor(0x0B, 0x0B, 0x0C)
+
+    def set_cell_border(cell, **kwargs):
+        tc_pr = cell._tc.get_or_add_tcPr()
+        tc_borders = OxmlElement("w:tcBorders")
+        for edge in ("top", "left", "bottom", "right"):
+            if edge in kwargs:
+                el = OxmlElement(f"w:{edge}")
+                el.set(qn("w:val"), "single")
+                el.set(qn("w:sz"), "6")
+                el.set(qn("w:color"), "0B0B0C")
+                tc_borders.append(el)
+        tc_pr.append(tc_borders)
+
+    out_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "factures")
+    os.makedirs(out_dir, exist_ok=True)
+    client_label = f"{client['nom']}_{client['prenom'] or ''}".strip("_") if client else "client"
+    fname = f"Facture_{sale['id']}_{client_label.replace(' ', '_')}.docx"
+    path = os.path.join(out_dir, fname)
+
+    doc = Document()
+    section = doc.sections[0]
+    section.page_height, section.page_width = Mm(297), Mm(210)
+    for m in ("top_margin", "bottom_margin", "left_margin", "right_margin"):
+        setattr(section, m, Mm(18))
+
+    # ---------- en-tête (logo texte + titre) ----------
+    header_table = doc.add_table(rows=1, cols=3)
+    header_table.autofit = True
+    logo_path = os.path.join(ASSETS_DIR, "optilux_logo.png")
+    for col_idx, align in ((0, WD_ALIGN_PARAGRAPH.LEFT), (2, WD_ALIGN_PARAGRAPH.RIGHT)):
+        cell = header_table.rows[0].cells[col_idx]
+        p = cell.paragraphs[0]
+        p.alignment = align
+        if os.path.exists(logo_path):
+            try:
+                p.add_run().add_picture(logo_path, height=Mm(9))
+            except Exception:
+                pass
+        run = p.add_run(" OPTILUX")
+        run.bold = True
+        run.font.size = Pt(13)
+
+    year = (sale["date"] or today_iso())[:4]
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = p.add_run(f"Facture N° {sale['id']} / {year}")
+    run.bold = True
+    run.font.size = Pt(16)
+    run.font.color.rgb = RED_RGB
+
+    for text, size, bold in (("OPTICIENNE - OPTOMETRISTE", 11, False), ("HAOURIR Sanae", 13, True)):
+        p = doc.add_paragraph()
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        run = p.add_run(text)
+        run.bold = bold
+        run.font.size = Pt(size)
+
+    date_str = sale["date"] or today_iso()
+    try:
+        yyyy, mm_, dd = date_str.split("-")
+    except ValueError:
+        yyyy, mm_, dd = year, "", ""
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p.add_run(f"Tanger le : {dd} / {mm_} / {yyyy}")
+
+    doc.add_paragraph()
+    nom_complet = f"{client['nom']} {client['prenom'] or ''}".strip() if client else ""
+    p = doc.add_paragraph()
+    run = p.add_run("Mr – Mme – Mlle : ")
+    run2 = p.add_run(nom_complet)
+    run2.bold = True
+    run2.underline = True
+
+    # ---------- Vision de LOIN / ADD Vision de PRES ----------
+    def fmt_loin(sph, cyl, axe):
+        if not sph and not cyl and not axe:
+            return ""
+        return f"{sph or '---'} ({cyl or '---'}) {axe or ''}".strip()
+
+    loin_od = fmt_loin(rx["od_sph"], rx["od_cyl"], rx["od_axe"]) if rx else ""
+    loin_og = fmt_loin(rx["og_sph"], rx["og_cyl"], rx["og_axe"]) if rx else ""
+    pres_od = (rx["od_add"] or "") if rx else ""
+    pres_og = (rx["og_add"] or "") if rx else ""
+
+    vt = doc.add_table(rows=3, cols=2)
+    vt.alignment = WD_TABLE_ALIGNMENT.CENTER
+    headers = vt.rows[0].cells
+    headers[0].text = "Vision de LOIN"
+    headers[1].text = "ADD Vision de PRES"
+    for cell in headers:
+        cell.paragraphs[0].runs[0].bold = True
+        cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+        set_cell_border(cell, top=1, left=1, right=1, bottom=1)
+    for row_i, (od_val, og_val_pair) in enumerate([
+        (loin_od, pres_od), (loin_og, pres_og)
+    ], start=1):
+        c0 = vt.rows[row_i].cells[0]
+        c1 = vt.rows[row_i].cells[1]
+        label = "OD : " if row_i == 1 else "OG : "
+        c0.text = f"{label}{od_val}"
+        c1.text = f"{label}{og_val_pair}"
+        for cell in (c0, c1):
+            set_cell_border(cell, top=1, left=1, right=1, bottom=1)
+
+    doc.add_paragraph()
+    vl_checked = bool(rx["vl"]) if rx else False
+    vp_checked = bool(rx["vp"]) if rx else False
+    pg_checked = bool(rx["pg"]) if rx else False
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    for label, checked in (("VL", vl_checked), ("VP", vp_checked), ("PROGRESSIF", pg_checked)):
+        box = "\u2611" if checked else "\u2610"  # ☑ / ☐ — glyphes Unicode standards, rendus nativement par Word
+        run = p.add_run(f"  {label} {box}   ")
+        run.bold = True
+
+    # ---------- table Désignation / Prix unité / Montant TTC ----------
+    doc.add_paragraph()
+    dt = doc.add_table(rows=3, cols=3)
+    dt.alignment = WD_TABLE_ALIGNMENT.CENTER
+    hdr = dt.rows[0].cells
+    for i, txt in enumerate(("Désignation", "Prix unité", "Montant TTC")):
+        hdr[i].text = txt
+        hdr[i].paragraphs[0].runs[0].bold = True
+        hdr[i].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    verres_desc = (rx["verres_texte"] if rx and rx["verres_texte"] else "") or "correcteurs organiques antireflet"
+    row1 = dt.rows[1].cells
+    row1[0].text = "-  Monture optique."
+    row1[1].text = f"{sale['monture']:.0f},00"
+    row1[2].text = f"{sale['monture']:.0f},00"
+
+    row2 = dt.rows[2].cells
+    row2[0].text = f"-  Verres correcteurs : {verres_desc}"
+    row2[1].text = f"{sale['verres']:.0f},00"
+    row2[2].text = f"{sale['verres']:.0f},00"
+
+    for row in dt.rows:
+        for cell in row.cells:
+            set_cell_border(cell, top=1, left=1, right=1, bottom=1)
+            for para in cell.paragraphs:
+                if not para.alignment and cell != row1[0] and cell != row2[0]:
+                    para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    tt = doc.add_table(rows=1, cols=2)
+    tt.alignment = WD_TABLE_ALIGNMENT.CENTER
+    c0, c1 = tt.rows[0].cells
+    c0.text = "Cachet et signature :"
+    remise_txt = f"  (-{sale['remise']}%)" if sale["remise"] else ""
+    c1.text = f"TOTAL TTC : {sale['vente']:.0f},00 DH{remise_txt}"
+    c1.paragraphs[0].runs[0].bold = True
+    for cell in (c0, c1):
+        set_cell_border(cell, top=1, left=1, right=1, bottom=1)
+
+    # ---------- montant en lettres ----------
+    doc.add_paragraph()
+    words = num_to_french_words(sale["vente"]).upper()
+    p = doc.add_paragraph()
+    run = p.add_run("\u2713  Arrêtée la présente facture à la somme de : ")
+    run.bold = True
+    p.add_run(f"{words} DIRHAMS.")
+
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = p.add_run("NB : Tous les montants sont exprimés en Dirhams.")
+    run.italic = True
+    run.font.size = Pt(9)
+
+    doc.add_paragraph()
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = p.add_run("ADRESSE : VIENNA MALL - B1 angle Moutanabi et Ahmed chawki - RDC N°04 - TANGER")
+    run.font.size = Pt(8)
+    p2 = doc.add_paragraph()
+    p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run2 = p2.add_run("RC: 148206 / PATENTE: 50405209 / IF: 24813627 / ICE: 001962144000020 / NUM : 06 49 24 94 24")
+    run2.font.size = Pt(8)
+
+    doc.save(path)
     return path
 
 
@@ -2564,6 +3012,159 @@ class UsersPage(BasePage):
 
 
 # ================================================================== TYPES & PRODUITS (admin only)
+# ================================================================== FACTURES
+class FacturesPage(BasePage):
+    def __init__(self, parent, app):
+        super().__init__(parent, app)
+        self.show_type = "client"
+        self.header("Documents", "Factures", "+ Ajouter manuellement", self.open_form)
+
+        toggle_row = tk.Frame(self, bg=CONTENT_BG)
+        toggle_row.pack(fill="x", pady=(0, 10))
+        self.btn_client = self.mode_button(toggle_row, "Factures clients", lambda: self.set_type("client"))
+        self.btn_client.pack(side="left", padx=(0, 8))
+        self.btn_entreprise = self.mode_button(toggle_row, "Factures de l'entreprise",
+                                                lambda: self.set_type("entreprise"))
+        self.btn_entreprise.pack(side="left")
+
+        self.search_var = self.make_search_box("Rechercher une facture…")
+        self.tree = self.make_table(["Titre", "Date", "Montant", "Fichier"])
+        self.tree.bind("<Double-1>", lambda e: self.open_selected_file())
+        btns = tk.Frame(self, bg=CONTENT_BG)
+        btns.pack(fill="x", pady=(8, 0))
+        outline_button(btns, "Ouvrir le fichier", self.open_selected_file, icon="document").pack(side="left")
+        outline_button(btns, "Modifier", lambda: self.open_form(self._selected_id()), icon="edit").pack(side="left", padx=(12, 0))
+        danger_button(btns, "Supprimer", self.delete_selected).pack(side="left", padx=(12, 0))
+        self._update_toggle_style()
+
+    def set_type(self, t):
+        self.show_type = t
+        self._update_toggle_style()
+        self.refresh()
+
+    def _update_toggle_style(self):
+        self.set_mode_button_active(self.btn_client, self.show_type == "client")
+        self.set_mode_button_active(self.btn_entreprise, self.show_type == "entreprise")
+
+    def _selected_id(self):
+        sel = self.tree.selection()
+        return int(sel[0]) if sel else None
+
+    def refresh(self):
+        for i in self.tree.get_children():
+            self.tree.delete(i)
+        q = self.search_var.get()
+        conn = get_connection()
+        rows = conn.execute("SELECT * FROM factures WHERE type=? ORDER BY date DESC",
+                             (self.show_type,)).fetchall()
+        conn.close()
+        n = 0
+        for f in rows:
+            if not self.row_matches(q, f["titre"], f["notes"]):
+                continue
+            self.tree.insert("", "end", iid=str(f["id"]), tags=("even" if n % 2 == 0 else "odd",),
+                              values=(f["titre"] or "—", f["date"] or "—", money(f["montant"]),
+                                      os.path.basename(f["fichier_path"]) if f["fichier_path"] else "—"))
+            n += 1
+
+    def open_selected_file(self):
+        fid = self._selected_id()
+        if not fid:
+            messagebox.showinfo("Info", "Sélectionnez une facture.")
+            return
+        conn = get_connection()
+        row = conn.execute("SELECT * FROM factures WHERE id=?", (fid,)).fetchone()
+        conn.close()
+        if not row or not row["fichier_path"] or not os.path.exists(row["fichier_path"]):
+            messagebox.showinfo("Info", "Aucun fichier associé à cette facture.")
+            return
+        open_file(row["fichier_path"])
+
+    def delete_selected(self):
+        fid = self._selected_id()
+        if not fid:
+            messagebox.showinfo("Info", "Sélectionnez une facture.")
+            return
+        if not messagebox.askyesno("Confirmer", "Supprimer cette facture de la liste ?\n\n"
+                                    "(Le fichier associé n'est pas supprimé du disque.)"):
+            return
+        conn = get_connection()
+        conn.execute("DELETE FROM factures WHERE id=?", (fid,))
+        conn.commit(); conn.close()
+        log_action(self.app.current_user["username"], "Facture supprimée de la liste")
+        self.refresh()
+
+    def open_form(self, facture_id=None):
+        conn = get_connection()
+        f = conn.execute("SELECT * FROM factures WHERE id=?", (facture_id,)).fetchone() if facture_id else None
+        conn.close()
+
+        modal = ModalForm(self.app, "Modifier la facture" if f else "Ajouter une facture", width=420)
+        body = modal.body
+        titre_e = field(body, "Titre / Description", f["titre"] if f else "")
+        row = tk.Frame(body, bg=SURFACE); row.pack(fill="x")
+        row.grid_columnconfigure(0, weight=1); row.grid_columnconfigure(1, weight=1)
+        date_wrap = tk.Frame(row, bg=SURFACE); date_wrap.grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        montant_wrap = tk.Frame(row, bg=SURFACE); montant_wrap.grid(row=0, column=1, sticky="ew", padx=(6, 0))
+        date_e = field(date_wrap, "Date", f["date"] if f else today_iso())
+        montant_e = field(montant_wrap, "Montant (DH)", str(f["montant"]) if f else "0")
+        notes_e = field(body, "Notes (optionnel)", f["notes"] if f and f["notes"] else "")
+
+        tk.Label(body, text="FICHIER", font=FONT_MONO_SM, fg=SLATE, bg=SURFACE, anchor="w").pack(fill="x", pady=(10, 2))
+        state = {"path": f["fichier_path"] if f else None}
+        file_lbl = tk.Label(body, text=os.path.basename(state["path"]) if state["path"] else "Aucun fichier choisi",
+                             font=FONT_BODY, bg=SURFACE, fg=TEXT if state["path"] else SLATE, anchor="w")
+        file_lbl.pack(fill="x", pady=(0, 6))
+
+        def choose_file():
+            path = filedialog.askopenfilename(
+                title="Choisir un fichier (PDF ou image)",
+                filetypes=[("Documents", "*.pdf *.png *.jpg *.jpeg *.webp"), ("Tous les fichiers", "*.*")])
+            if not path:
+                return
+            try:
+                os.makedirs(FACTURE_FILES_DIR, exist_ok=True)
+                ext = os.path.splitext(path)[1]
+                fname = f"{uuid.uuid4().hex}{ext}"
+                dest = os.path.join(FACTURE_FILES_DIR, fname)
+                with open(path, "rb") as src, open(dest, "wb") as dst:
+                    dst.write(src.read())
+                state["path"] = dest
+                file_lbl.configure(text=os.path.basename(dest), fg=TEXT)
+            except Exception as e:
+                messagebox.showerror("Erreur", f"Impossible de copier le fichier :\n{e}")
+
+        outline_button(body, "Choisir un fichier…", choose_file, icon="document").pack(fill="x")
+
+        def save():
+            titre = titre_e.get().strip()
+            if not titre:
+                messagebox.showwarning("Champ requis", "Le titre est obligatoire.")
+                return
+            try:
+                montant = float(montant_e.get() or 0)
+            except ValueError:
+                messagebox.showwarning("Valeur invalide", "Montant invalide.")
+                return
+            conn = get_connection()
+            if f:
+                conn.execute("""UPDATE factures SET titre=?, date=?, montant=?, notes=?, fichier_path=?, type=?
+                                 WHERE id=?""",
+                             (titre, date_e.get(), montant, notes_e.get(), state["path"], self.show_type, f["id"]))
+                action = f"Facture modifiée : {titre}"
+            else:
+                conn.execute("""INSERT INTO factures (type,titre,date,montant,fichier_path,notes)
+                                 VALUES (?,?,?,?,?,?)""",
+                             (self.show_type, titre, date_e.get(), montant, state["path"], notes_e.get()))
+                action = f"Facture ajoutée : {titre}"
+            conn.commit(); conn.close()
+            log_action(self.app.current_user["username"], action)
+            modal.destroy()
+            self.refresh()
+
+        modal.buttons(save)
+
+
 class TypesPage(BasePage):
     def __init__(self, parent, app):
         super().__init__(parent, app)

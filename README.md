@@ -70,6 +70,54 @@ fenêtre / barre des tâches (sous Windows).
   fenêtre elle-même reste toujours parfaitement opaque, vous ne voyez jamais
   le bureau Windows à travers l'application.
 
+## Dernière mise à jour
+
+- **Lisibilité** : toutes les polices agrandies dans toute l'application
+  (menu, tableaux, boutons, formulaires) pour une lecture plus confortable.
+  La barre latérale et les lignes des tableaux ont été élargies en
+  conséquence pour que rien ne soit coupé.
+- **Facture refaite à l'identique** de votre vraie facture papier : les deux
+  logos OPTILUX, Vision de LOIN / ADD Vision de PRES, les cases VL/VP/PROGRESSIF,
+  le tableau Désignation/Prix unité/Montant TTC, Cachet et signature + TOTAL TTC,
+  le montant en toutes lettres, et le pied de page avec vos informations légales.
+- **Facture en Word (.docx)**, en plus du PDF — un bouton "Facture Word" à
+  côté de "Facture PDF" dans Ventes. Les deux formats sont conservés
+  séparément (générer l'un n'efface pas l'autre).
+- **Rangement des factures** (nouvel onglet "Factures") : toutes les
+  factures générées depuis une vente y apparaissent automatiquement, et vous
+  pouvez aussi en ajouter manuellement (avec un fichier PDF/image/Word joint).
+  Séparées en deux : **Factures clients** et **Factures de l'entreprise**
+  (ex. vos propres factures fournisseurs).
+- **Tableau de bord enrichi** : nouvelle carte "Commandes à suivre" (visible
+  par tous), et "Factures récentes" (administrateur). Les cartes du bas sont
+  passées de 3 à 2 par rangée pour laisser respirer le texte agrandi.
+- **Correction** : le petit indicateur "photo" du Stock qui s'affichait
+  parfois comme un carré illisible (rendu incompatible avec certaines
+  polices Windows) a été remplacé par du texte simple ("Oui"/"—").
+- **Rappels WhatsApp automatiques (gratuit)** : voir la section dédiée
+  ci-dessous.
+
+## WhatsApp automatique (gratuit)
+
+Utilise `pywhatkit` — pas de clé API, pas de compte professionnel Meta.
+
+- **Automatique** : quand un rappel de rendez-vous se déclenche (15 minutes
+  avant), si le client a un numéro de téléphone enregistré dans sa fiche,
+  un message WhatsApp lui est envoyé en plus de la notification Windows.
+- **Manuel** : bouton "Envoyer rappel WhatsApp" dans Rendez-vous, pour
+  envoyer à la demande sur le rendez-vous sélectionné.
+
+**Important à savoir avant d'utiliser cette fonctionnalité :**
+- Il faut que WhatsApp Web soit déjà connecté sur l'ordinateur (scan du QR
+  code une seule fois — la session reste active ensuite).
+- Une fenêtre de navigateur s'ouvre VISIBLEMENT à chaque envoi — ce n'est
+  pas silencieux comme les notifications Windows.
+- Ce n'est pas un canal officiel WhatsApp. Réservez ceci à des rappels
+  ponctuels, pas à un envoi en masse — un envoi trop fréquent peut faire
+  limiter temporairement le numéro par WhatsApp.
+- Les numéros marocains locaux (ex. 0612345678) sont convertis
+  automatiquement au format international (+212612345678).
+
 ## Nouveautés — grosse mise à jour
 
 - **Fiche client** entièrement refaite pour correspondre à votre fiche papier :
