@@ -118,6 +118,46 @@ Utilise `pywhatkit` — pas de clé API, pas de compte professionnel Meta.
 - Les numéros marocains locaux (ex. 0612345678) sont convertis
   automatiquement au format international (+212612345678).
 
+## Dernière mise à jour (2)
+
+- **Correction d'un vrai bug** : la fiche client s'affichait tronquée (quelques
+  champs seulement, puis plus rien) dès qu'un client avait une info manquante
+  (date de naissance, ville ou téléphone vides). C'était un plantage silencieux
+  au moment de préremplir le champ — corrigé à la racine, ça ne peut plus
+  arriver nulle part dans l'application.
+- **Fiche client et fiche produit** : ouvrir un client ou un article (double-clic,
+  ou bouton "Voir la fiche") affiche maintenant une fiche de consultation
+  propre et en lecture seule — plus de risque de modifier une info par erreur.
+  Un bouton "Modifier" explicite ouvre ensuite le vrai formulaire d'édition.
+  La fiche produit affiche la photo en grand en haut, comme demandé.
+- **Calendrier (.ics)** : bouton "Exporter calendrier" sur le tableau de bord.
+  Regroupe tous les rendez-vous et commandes à venir dans un fichier
+  standard que Google Agenda et l'application Calendrier Samsung savent
+  ouvrir directement. Voir la section dédiée ci-dessous.
+
+## Calendrier sur votre téléphone (Samsung)
+
+Le bouton **"Exporter calendrier (.ics)"** sur le tableau de bord crée un
+fichier contenant tous les rendez-vous et commandes à venir.
+
+**Comment le voir sur votre téléphone :**
+1. Cliquez sur le bouton, choisissez où l'enregistrer (par exemple dans un
+   dossier Google Drive ou OneDrive s'il est installé sur l'ordinateur —
+   sinon n'importe où, puis envoyez-le-vous par e-mail).
+2. Sur votre téléphone, ouvrez ce fichier (depuis l'e-mail, ou l'app Google
+   Drive/OneDrive, ou en le transférant par USB/Bluetooth).
+3. Le téléphone propose de l'ajouter à **Google Agenda** ou au
+   **Calendrier Samsung** — les événements apparaissent avec un rappel
+   30 minutes avant.
+
+**Important à savoir** : ce n'est **pas** une synchronisation automatique en
+continu — c'est un export que vous relancez de temps en temps (par exemple
+chaque matin, ou une fois par semaine) pour que le téléphone reste à jour.
+Une vraie synchronisation automatique (les nouveaux RDV apparaissent seuls
+sur le téléphone sans réexporter) est possible mais demande de connecter
+l'application à un compte Google — un projet plus important, à faire si
+cette fonctionnalité s'avère utile au quotidien.
+
 ## Nouveautés — grosse mise à jour
 
 - **Fiche client** entièrement refaite pour correspondre à votre fiche papier :

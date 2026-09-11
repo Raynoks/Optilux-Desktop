@@ -215,6 +215,35 @@ def num_to_french_words(n):
     return " ".join(p for p in parts if p).strip()
 
 
+def _ics_escape(text):
+    return (text or "").replace("\\", "\\\\").replace(",", "\\,").replace(";", "\\;").replace("\n", "\\n")
+
+
+def generate_ics(events):
+    """Construit un fichier calendrier standard (.ics). Compatible avec Google Agenda,
+    le Calendrier Samsung, Outlook, etc. — n'importe quelle app calendrier sait
+    l'importer, sur ordinateur comme sur téléphone."""
+    lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//OPTILUX//FR", "CALSCALE:GREGORIAN"]
+    stamp = datetime.datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    for e in events:
+        lines.append("BEGIN:VEVENT")
+        lines.append(f"UID:{e['uid']}@optilux.local")
+        lines.append(f"DTSTAMP:{stamp}")
+        lines.append(f"DTSTART:{e['start'].strftime('%Y%m%dT%H%M%S')}")
+        lines.append(f"DTEND:{e['end'].strftime('%Y%m%dT%H%M%S')}")
+        lines.append(f"SUMMARY:{_ics_escape(e['summary'])}")
+        if e.get("description"):
+            lines.append(f"DESCRIPTION:{_ics_escape(e['description'])}")
+        lines.append("BEGIN:VALARM")
+        lines.append("TRIGGER:-PT30M")
+        lines.append("ACTION:DISPLAY")
+        lines.append("DESCRIPTION:Rappel")
+        lines.append("END:VALARM")
+        lines.append("END:VEVENT")
+    lines.append("END:VCALENDAR")
+    return "\r\n".join(lines) + "\r\n"
+
+
 def open_file(path):
     """Ouvre un fichier avec l'application par défaut du système."""
     try:
@@ -675,7 +704,7 @@ def field(parent, label_text, initial="", show=None, width=None):
                       highlightbackground=BORDER, highlightcolor=RED, highlightthickness=1)
     if width:
         entry.config(width=width)
-    entry.insert(0, initial)
+    entry.insert(0, "" if initial is None else str(initial))
     entry.pack(fill="x", ipady=4)
     return entry
 
@@ -1391,6 +1420,34 @@ class BasePage(tk.Frame):
         button.configure(bg=button._rest_bg, fg=button._rest_fg,
                           highlightbackground=RED if active else BORDER)
 
+    def show_detail_modal(self, title, build_content_fn, on_edit, width=480):
+        """Fenêtre de consultation en lecture seule : affiche les infos proprement,
+        avec un bouton Modifier explicite pour passer au formulaire d'édition —
+        on ne tombe jamais directement en mode modification."""
+        modal = ModalForm(self.app, title, width=width)
+        build_content_fn(modal.body)
+
+        def go_edit():
+            modal.destroy()
+            on_edit()
+
+        primary_button(modal.footer, "Modifier", go_edit, icon="edit").pack(
+            side="left", fill="x", expand=True, ipady=4, padx=(0, 8))
+        outline_button(modal.footer, "Fermer", modal.destroy, icon="close").pack(side="left", ipady=4)
+        return modal
+
+    @staticmethod
+    def info_row(parent, label, value, value_color=None):
+        row = tk.Frame(parent, bg=SURFACE)
+        row.pack(fill="x", pady=4)
+        tk.Label(row, text=label.upper(), font=FONT_MONO_SM, bg=SURFACE, fg=SLATE).pack(side="left")
+        tk.Label(row, text=value if value not in (None, "") else "—", font=FONT_BODY_B, bg=SURFACE,
+                  fg=value_color or TEXT, wraplength=260, justify="right").pack(side="right")
+
+    @staticmethod
+    def section_label(parent, text):
+        tk.Label(parent, text=text, font=FONT_MONO_SM, fg=RED, bg=SURFACE).pack(anchor="w", pady=(14, 4))
+
     def make_table(self, columns, height=14):
         wrap = tk.Frame(self, bg=SURFACE, highlightbackground=BORDER, highlightthickness=1)
         wrap.pack(fill="both", expand=True)
@@ -1497,6 +1554,9 @@ class DashboardPage(BasePage):
         for w in self.winfo_children():
             w.destroy()
         self.header("Aperçu", "Tableau de bord")
+        export_row = tk.Frame(self, bg=CONTENT_BG)
+        export_row.pack(fill="x", pady=(0, 16))
+        outline_button(export_row, "Exporter calendrier (.ics)", self.export_calendar, icon="calendar").pack(side="right")
 
         conn = get_connection()
         ym = today_iso()[:7]
@@ -1587,6 +1647,74 @@ class DashboardPage(BasePage):
                 tk.Label(r, text=label_txt, font=FONT_MONO_SM, bg=SURFACE, fg=TEXT).pack(side="left")
                 tk.Label(r, text=status_txt, font=FONT_MONO_SM, bg=SURFACE, fg=status_color).pack(side="right")
 
+    def export_calendar(self):
+        conn = get_connection()
+        today = today_iso()
+        appts = conn.execute(
+            "SELECT * FROM appointments WHERE date>=? AND statut NOT IN ('Terminé','Annulé') ORDER BY date, heure",
+            (today,)).fetchall()
+        commandes_rows = conn.execute("""SELECT commandes.*, clients.nom as client_nom, clients.prenom as client_prenom
+                                          FROM commandes LEFT JOIN clients ON clients.id = commandes.client_id
+                                          WHERE date_prevue>=? AND statut NOT IN ('Livrée','Annulée')
+                                          ORDER BY date_prevue""", (today,)).fetchall()
+        conn.close()
+
+        events = []
+        for a in appts:
+            try:
+                hh, mm = map(int, a["heure"].split(":"))
+                start = datetime.datetime.strptime(a["date"], "%Y-%m-%d").replace(hour=hh, minute=mm)
+            except Exception:
+                continue
+            events.append({
+                "uid": f"optilux-rdv-{a['id']}",
+                "start": start, "end": start + datetime.timedelta(minutes=30),
+                "summary": f"RDV — {a['client_nom']}",
+                "description": a["service"] or "",
+            })
+        for cmd in commandes_rows:
+            try:
+                start = datetime.datetime.strptime(cmd["date_prevue"], "%Y-%m-%d").replace(hour=9, minute=0)
+            except Exception:
+                continue
+            who = (cmd["fournisseur"] if (cmd["type"] or "client") == "fournisseur"
+                   else f"{cmd['client_nom'] or ''} {cmd['client_prenom'] or ''}".strip()) or "—"
+            events.append({
+                "uid": f"optilux-cmd-{cmd['id']}",
+                "start": start, "end": start + datetime.timedelta(hours=1),
+                "summary": f"Commande — {who}",
+                "description": cmd["description"] or "",
+            })
+
+        if not events:
+            messagebox.showinfo("Calendrier", "Aucun rendez-vous ou commande à venir à exporter.")
+            return
+
+        default_name = f"optilux_calendrier_{today}.ics"
+        path = filedialog.asksaveasfilename(
+            title="Enregistrer le calendrier", defaultextension=".ics", initialfile=default_name,
+            filetypes=[("Calendrier iCalendar", "*.ics")])
+        if not path:
+            return
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(generate_ics(events))
+        except Exception as e:
+            messagebox.showerror("Erreur", f"Impossible d'enregistrer le fichier :\n{e}")
+            return
+
+        log_action(self.app.current_user["username"], f"Calendrier exporté ({len(events)} événement(s))")
+        messagebox.showinfo(
+            "Calendrier exporté",
+            f"{len(events)} événement(s) exporté(s) avec succès.\n\n"
+            "Pour les voir sur votre téléphone (Samsung) : envoyez-vous ce fichier par e-mail, ou "
+            "enregistrez-le dans Google Drive / OneDrive, puis ouvrez-le depuis votre téléphone — "
+            "il s'ajoutera automatiquement à Google Agenda ou à l'application Calendrier Samsung.\n\n"
+            "Astuce : refaites cet export de temps en temps pour garder votre téléphone à jour "
+            "(ce n'est pas une synchronisation automatique en continu)."
+        )
+        open_file(path)
+
     def _card_title(self, parent, text, icon_name):
         icon = get_icon(icon_name, RED, size=17)
         lbl = tk.Label(parent, text=" " + text, font=FONT_DISPLAY_SM, bg=SURFACE, fg=TEXT,
@@ -1620,11 +1748,11 @@ class ClientsPage(BasePage):
         self.header("Fiches", "Clients", "+ Nouveau client", self.open_form)
         self.search_var = self.make_search_box("Rechercher un client…")
         self.tree = self.make_table(["Nom", "Prénom", "Téléphone", "Ville", "Remise", "Dernière Rx"])
-        self.tree.bind("<Double-1>", lambda e: self.open_form(self._selected_id()))
+        self.tree.bind("<Double-1>", lambda e: self.open_detail(self._selected_id()))
 
         btns = tk.Frame(self, bg=CONTENT_BG)
         btns.pack(fill="x", pady=(8, 0))
-        outline_button(btns, "Modifier la sélection", lambda: self.open_form(self._selected_id()), icon="edit").pack(side="left")
+        outline_button(btns, "Voir la fiche", lambda: self.open_detail(self._selected_id()), icon="search").pack(side="left")
         danger_button(btns, "Supprimer", self.delete_selected).pack(side="left", padx=(0, 12))
 
     def _selected_id(self):
@@ -1664,6 +1792,80 @@ class ClientsPage(BasePage):
         conn.close()
         log_action(self.app.current_user["username"], f"Client supprimé : {row['nom']}")
         self.refresh()
+
+    def open_detail(self, client_id=None):
+        if not client_id:
+            messagebox.showinfo("Info", "Sélectionnez un client.")
+            return
+        conn = get_connection()
+        c = conn.execute("SELECT * FROM clients WHERE id=?", (client_id,)).fetchone()
+        rx = conn.execute("SELECT * FROM prescriptions WHERE client_id=? ORDER BY id DESC LIMIT 1",
+                           (client_id,)).fetchone()
+        conn.close()
+        if not c:
+            return
+
+        def rxg(key, default="—"):
+            try:
+                v = rx[key]
+                return v if v not in (None, "") else default
+            except (KeyError, IndexError, TypeError):
+                return default
+
+        def build(body):
+            self.info_row(body, "Né(e) le", c["date_naissance"])
+            self.info_row(body, "Ville", c["ville"])
+            self.info_row(body, "Téléphone", c["tel"])
+            self.info_row(body, "Remise", f"{c['remise']}%" if c["remise"] else "—")
+
+            if rx:
+                self.section_label(body, "E.F.H")
+                efh = " · ".join(lbl for lbl, on in (("VL", rx["vl"]), ("VP", rx["vp"]), ("PG", rx["pg"])) if on) or "—"
+                self.info_row(body, "Type", efh)
+
+                self.section_label(body, "ARX")
+                self.info_row(body, "OD", rxg("arx_od"))
+                self.info_row(body, "OG", rxg("arx_og"))
+
+                self.section_label(body, "AV. Brute")
+                self.info_row(body, "OD / OG / ODG",
+                              f"{rxg('av_od')} / {rxg('av_og')} / {rxg('av_odg')}")
+
+                self.section_label(body, "Suivi")
+                self.info_row(body, "Prescripteur", rxg("prescripteur"))
+                self.info_row(body, "Mutuelle", "Oui — " + rxg("mutuelle_texte") if rx["mutuelle_oui"] else "Non")
+                self.info_row(body, "Maladie", "Oui — " + rxg("maladie_texte") if rx["maladie_oui"] else "Non")
+                self.info_row(body, "Montage", "Oui" if rx["montage_oui"] else "Non")
+
+                self.section_label(body, "Correction")
+                table = tk.Frame(body, bg=SURFACE)
+                table.pack(fill="x", pady=(0, 4))
+                cols = ["", "SPH", "CYL", "AXE", "ADD", "EP", "HT"]
+                for i, h in enumerate(cols):
+                    tk.Label(table, text=h, font=FONT_MONO_SM, fg=SLATE, bg=SURFACE).grid(row=0, column=i, padx=4)
+                    table.grid_columnconfigure(i, weight=1)
+                for r, eye in ((1, "od"), (2, "og")):
+                    tk.Label(table, text=eye.upper(), font=FONT_BODY_B, fg=TEXT, bg=SURFACE).grid(row=r, column=0)
+                    for i, field_key in enumerate(("sph", "cyl", "axe", "add", "ep", "ht"), start=1):
+                        tk.Label(table, text=rxg(f"{eye}_{field_key}"), font=FONT_MONO_SM, fg=TEXT,
+                                  bg=SURFACE).grid(row=r, column=i, padx=4, pady=2)
+
+                self.section_label(body, "Verres / Firme / Monture")
+                self.info_row(body, "Verres", rxg("verres_texte"))
+                self.info_row(body, "Firme", rxg("firme_texte"))
+                self.info_row(body, "Monture", rxg("monture_texte"))
+
+                self.section_label(body, "Prix")
+                self.info_row(body, "Prix / Avance", f"{rxg('prix')} / {rxg('avance')}")
+                self.info_row(body, "Jour de livraison", rxg("jour_livraison"))
+                self.info_row(body, "R", rxg("r_texte"))
+            else:
+                self.section_label(body, "Prescription")
+                tk.Label(body, text="Aucune prescription enregistrée pour ce client.",
+                          font=FONT_MONO_SM, bg=SURFACE, fg=SLATE).pack(anchor="w")
+
+        title = f"{c['nom']} {c['prenom'] or ''}".strip() or "Fiche client"
+        self.show_detail_modal(title, build, lambda: self.open_form(client_id), width=480)
 
     def open_form(self, client_id=None):
         conn = get_connection()
@@ -1975,10 +2177,10 @@ class StockPage(BasePage):
         self.header("Inventaire", "Stock", "+ Nouvel article", self.open_form)
         self.search_var = self.make_search_box("Rechercher un article…")
         self.tree = self.make_table(["Photo", "Article", "Catégorie", "Marque", "Qté", "Prix vente", "Statut"])
-        self.tree.bind("<Double-1>", lambda e: self.open_form(self._selected_id()))
+        self.tree.bind("<Double-1>", lambda e: self.open_detail(self._selected_id()))
         btns = tk.Frame(self, bg=CONTENT_BG)
         btns.pack(fill="x", pady=(8, 0))
-        outline_button(btns, "Modifier la sélection", lambda: self.open_form(self._selected_id()), icon="edit").pack(side="left")
+        outline_button(btns, "Voir la fiche", lambda: self.open_detail(self._selected_id()), icon="search").pack(side="left")
         danger_button(btns, "Supprimer", self.delete_selected).pack(side="left", padx=(0, 12))
 
     def _selected_id(self):
@@ -2017,6 +2219,53 @@ class StockPage(BasePage):
         conn.commit(); conn.close()
         log_action(self.app.current_user["username"], f"Article supprimé : {row['nom']}")
         self.refresh()
+
+    def open_detail(self, stock_id=None):
+        if not stock_id:
+            messagebox.showinfo("Info", "Sélectionnez un article.")
+            return
+        conn = get_connection()
+        s = conn.execute("SELECT * FROM stock WHERE id=?", (stock_id,)).fetchone()
+        conn.close()
+        if not s:
+            return
+
+        def build(body):
+            img_wrap = tk.Frame(body, bg=SURFACE)
+            img_wrap.pack(fill="x", pady=(0, 14))
+            full = os.path.join(PRODUCT_IMAGES_DIR, s["image_path"]) if s["image_path"] else None
+            photo_ref = None
+            if full and os.path.exists(full):
+                try:
+                    from PIL import Image, ImageTk
+                    im = Image.open(full).convert("RGB")
+                    im.thumbnail((320, 320), Image.LANCZOS)
+                    photo_ref = ImageTk.PhotoImage(im)
+                except Exception:
+                    photo_ref = None
+            img_lbl = tk.Label(img_wrap, bg=SURFACE)
+            if photo_ref:
+                img_lbl.configure(image=photo_ref)
+                img_lbl._icon_ref = photo_ref
+            else:
+                img_lbl.configure(text="Aucune photo", fg=SLATE, font=FONT_MONO_SM, width=26, height=10,
+                                    relief="solid", borderwidth=1, bg=SURFACE)
+            img_lbl.pack(anchor="center", pady=(0, 4))
+
+            low = s["qte"] <= s["seuil"]
+            self.info_row(body, "Statut", "STOCK BAS" if low else "OK", value_color=RED if low else "#2E7D46")
+            self.info_row(body, "Catégorie", s["categorie"])
+            self.info_row(body, "Marque", s["marque"])
+            self.info_row(body, "Quantité", str(s["qte"]))
+            self.info_row(body, "Prix achat", money(s["prix_achat"]))
+            self.info_row(body, "Prix vente", money(s["prix_vente"]))
+            self.info_row(body, "Seuil d'alerte", str(s["seuil"]))
+            if s["categorie"] == "Lentilles":
+                self.section_label(body, "Lentilles")
+                self.info_row(body, "Type", s["lentille_type"])
+                self.info_row(body, "Durée de port", s["lentille_duree"])
+
+        self.show_detail_modal(s["nom"], build, lambda: self.open_form(stock_id), width=440)
 
     def open_form(self, stock_id=None):
         conn = get_connection()
