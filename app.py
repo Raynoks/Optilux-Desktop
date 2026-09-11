@@ -936,7 +936,7 @@ class OptiluxApp(tk.Tk):
                        icon_path=ICON_ICO)
                 phone = self.find_client_phone(a["client_nom"])
                 if phone:
-                    msg = (f"Bonjour {a['client_nom']}, un rappel de votre rendez-vous "
+                    msg = (f"Bonjour M./Mme {a['client_nom']}, un rappel de votre rendez-vous "
                            f"chez OPTILUX aujourd'hui à {a['heure']} ({a['service']}). À bientôt !")
                     send_whatsapp(phone, msg)
                 self._notified_appointments.add(a["id"])
