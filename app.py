@@ -9,6 +9,7 @@ import datetime
 import os
 import sys
 import subprocess
+from turtle import title
 import uuid
 
 from database import (init_db, get_connection, log_action, DB_PATH, get_setting, set_setting,
@@ -158,6 +159,27 @@ TYPE_CATEGORIES = [
 def today_iso():
     return datetime.date.today().isoformat()
 
+def expense_is_paid_this_month(x):
+    """For a recurring charge, 'paid' means paid *for the current month*.
+    For a one-off charge, 'paid' just means paid. Rows without paye_mois
+    (older data) are treated as not-yet-paid-for-this-month if recurring."""
+    try:
+        paid = bool(x["paye"])
+    except (KeyError, IndexError, TypeError):
+        paid = False
+    if not paid:
+        return False
+    try:
+        recurring = bool(x["recurrent"])
+    except (KeyError, IndexError, TypeError):
+        recurring = False
+    if not recurring:
+        return True
+    try:
+        paye_mois = x["paye_mois"] or ""
+    except (KeyError, IndexError, TypeError):
+        paye_mois = ""
+    return paye_mois == datetime.date.today().strftime("%Y-%m")
 
 def money(n):
     try:
@@ -292,18 +314,29 @@ def setup_style(root):
 
 
 # ---------------------------------------------------------------- COLOR / HOVER ANIMATION
-def _hex_to_rgb(h):
-    h = h.lstrip("#")
-    return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
+def _hex_to_rgb(widget, value):
+    """Resolve a Tk color string to (r, g, b). Handles '#rrggbb', '#rgb', and named
+    colors like 'white', 'red', 'SystemButtonFace' via Tk's own resolver."""
+    value = str(value)
+    if value.startswith("#") and len(value) in (4, 7):
+        h = value.lstrip("#")
+        if len(h) == 3:
+            h = "".join(c * 2 for c in h)
+        return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
+    try:
+        r, g, b = widget.winfo_rgb(value)  # each 0..65535
+        return (r // 256, g // 256, b // 256)
+    except tk.TclError:
+        return (0, 0, 0)
 
 
 def _rgb_to_hex(rgb):
     return "#%02x%02x%02x" % tuple(max(0, min(255, int(round(c)))) for c in rgb)
 
 
-def _lerp_color(c1, c2, t):
-    r1, g1, b1 = _hex_to_rgb(c1)
-    r2, g2, b2 = _hex_to_rgb(c2)
+def _lerp_color(widget, c1, c2, t):
+    r1, g1, b1 = _hex_to_rgb(widget, c1)
+    r2, g2, b2 = _hex_to_rgb(widget, c2)
     return _rgb_to_hex((r1 + (r2 - r1) * t, g1 + (g2 - g1) * t, b1 + (b2 - b1) * t))
 
 
@@ -317,7 +350,7 @@ def _animate_props(widget, props, steps=8, duration=140):
             return
         t = i / steps
         try:
-            widget.configure(**{name: _lerp_color(c1, c2, t) for name, c1, c2 in props})
+             widget.configure(**{name: _lerp_color(widget, c1, c2, t) for name, c1, c2 in props})
         except tk.TclError:
             return
         if i < steps:
@@ -363,7 +396,7 @@ def fade_in_page(page, steps=6, duration=130):
             if not w.winfo_exists():
                 continue
             try:
-                w.configure(fg=_lerp_color(bg, real_fg, t))
+                w.configure(fg=_lerp_color(w, bg, real_fg, t))
             except Exception:
                 pass
         if i + 1 < steps:
@@ -708,6 +741,73 @@ def field(parent, label_text, initial="", show=None, width=None):
     entry.pack(fill="x", ipady=4)
     return entry
 
+class DateField(tk.Frame):
+    """Three spinboxes (J / M / A). Behaves like an Entry: .get() returns
+    'YYYY-MM-DD', or '' if incomplete. The '×' clears all three — used for
+    optional échéance / prévue fields."""
+    def __init__(self, parent, initial=""):
+        super().__init__(parent, bg=SURFACE, highlightbackground=BORDER, highlightcolor=RED,
+                         highlightthickness=1)
+        d = m = y = None
+        if initial:
+            try:
+                dt = datetime.date.fromisoformat(str(initial).strip())
+                d, m, y = dt.day, dt.month, dt.year
+            except (ValueError, TypeError):
+                pass
+        self.day_var = tk.StringVar(value=f"{d:02d}" if d else "")
+        self.month_var = tk.StringVar(value=f"{m:02d}" if m else "")
+        self.year_var = tk.StringVar(value=str(y) if y else "")
+
+        def make_spin(var, from_, to, width):
+            return tk.Spinbox(self, from_=from_, to=to, width=width, font=FONT_MONO_SM,
+                              bg=SURFACE, fg=TEXT, buttonbackground=CONTENT_BG,
+                              relief="flat", justify="center", textvariable=var,
+                              highlightthickness=0, borderwidth=0, wrap=True)
+
+        make_spin(self.day_var, 1, 31, 3).pack(side="left", padx=(8, 2), pady=5)
+        tk.Label(self, text="/", font=FONT_MONO_SM, bg=SURFACE, fg=SLATE).pack(side="left")
+        make_spin(self.month_var, 1, 12, 3).pack(side="left", padx=2)
+        tk.Label(self, text="/", font=FONT_MONO_SM, bg=SURFACE, fg=SLATE).pack(side="left")
+        make_spin(self.year_var, 1900, 2100, 5).pack(side="left", padx=(2, 8))
+
+        clear = tk.Label(self, text="×", font=FONT_BODY_B, bg=SURFACE, fg=SLATE, cursor="hand2")
+        clear.pack(side="right", padx=(0, 8))
+        clear.bind("<Button-1>", lambda e: self.clear())
+
+    def clear(self):
+        self.day_var.set("")
+        self.month_var.set("")
+        self.year_var.set("")
+
+    def get(self):
+        d = self.day_var.get().strip()
+        m = self.month_var.get().strip()
+        y = self.year_var.get().strip()
+        if not (d and m and y):
+            return ""
+        try:
+            return datetime.date(int(y), int(m), int(d)).isoformat()
+        except (ValueError, tk.TclError):
+            return ""
+
+    def set(self, value):
+        try:
+            dt = datetime.date.fromisoformat(str(value).strip())
+            self.day_var.set(f"{dt.day:02d}")
+            self.month_var.set(f"{dt.month:02d}")
+            self.year_var.set(str(dt.year))
+        except (ValueError, TypeError):
+            self.clear()
+
+
+def field_date(parent, label_text, initial=""):
+    """Same shape as field(), but renders a DateField. .get() returns the ISO date."""
+    tk.Label(parent, text=label_text.upper(), font=FONT_MONO_SM, fg=SLATE, bg=SURFACE,
+              anchor="w").pack(fill="x", pady=(8, 2))
+    df = DateField(parent, initial=initial)
+    df.pack(fill="x")
+    return df
 
 def dropdown(parent, label_text, options, initial=None):
     tk.Label(parent, text=label_text.upper(), font=FONT_MONO_SM, fg=SLATE, bg=SURFACE,
@@ -791,6 +891,7 @@ class OptiluxApp(tk.Tk):
         self.title("OPTILUX — Gestion")
         self.geometry("1180x740")
         self.minsize(1180, 740)
+        self._center_window()
         self.configure(bg=CONTENT_BG)
         setup_style(self)
         self._set_window_icon()
@@ -830,6 +931,19 @@ class OptiluxApp(tk.Tk):
         self.splash.destroy()
         self.login_frame.place(relx=0, rely=0, relwidth=1, relheight=1)
         self.login_frame.tkraise()
+
+    def _center_window(self):
+        """Center the main window on the user's screen at startup."""
+        self.update_idletasks()
+        w = self.winfo_width()
+        h = self.winfo_height()
+        if w <= 1 or h <= 1:
+            w, h = 1180, 740  # not yet realized — use the requested size
+        sw = self.winfo_screenwidth()
+        sh = self.winfo_screenheight()
+        x = max(0, (sw - w) // 2)
+        y = max(0, (sh - h) // 2)
+        self.geometry(f"{w}x{h}+{x}+{y}")
 
     def _set_window_icon(self):
         # .ico natif pour la barre des tâches Windows
@@ -942,7 +1056,7 @@ class OptiluxApp(tk.Tk):
                 self._notified_appointments.add(a["id"])
 
     def _check_expense_reminders(self):
-        """Rappel de charge : prévient 3 jours avant l'échéance d'une dépense, puis le jour même."""
+        """Rappel de charge : prévient 7 jours avant l'échéance d'une dépense, puis le jour même."""
         today = datetime.date.today()
         conn = get_connection()
         rows = conn.execute(
@@ -954,8 +1068,10 @@ class OptiluxApp(tk.Tk):
                 echeance = datetime.date.fromisoformat(x["date_echeance"])
             except ValueError:
                 continue
+            if expense_is_paid_this_month(x):
+                continue
             days_left = (echeance - today).days
-            if 0 <= days_left <= 3 and x["id"] not in self._notified_expenses:
+            if days_left <= 7 and x["id"] not in self._notified_expenses:
                 label = "aujourd'hui" if days_left == 0 else f"dans {days_left} jour(s)"
                 notify("Rappel de charge",
                        f"{x['libelle']} ({money(x['montant'])}) — échéance {label}",
@@ -1088,7 +1204,7 @@ class SplashScreen(tk.Frame):
         self._shimmer_phase += 0.18
         for i, bar in enumerate([self.sk_sidebar] + self.sk_bars):
             phase = (math.sin(self._shimmer_phase + i * 0.5) + 1) / 2
-            bar.configure(bg=_lerp_color("#1c1c1e", "#333336", phase))
+            bar.configure(bg=_lerp_color(bar, "#1c1c1e", "#333336", phase))
         self.after(70, self._shimmer_skeleton)
 
     def _finish(self):
@@ -1136,7 +1252,19 @@ class LoginFrame(tk.Frame):
         tk.Label(card, text="Employé : employe1 / employe123", font=FONT_MONO_SM,
                   fg=SLATE, bg=SURFACE, justify="center").pack()
 
+        self.user_entry.bind("<Return>", lambda e: self.attempt_login())
         self.pass_entry.bind("<Return>", lambda e: self.attempt_login())
+
+        self.user_entry.bind("<Key>", lambda e: self.error_lbl.pack_forget())
+        self.pass_entry.bind("<Key>", lambda e: self.error_lbl.pack_forget())
+
+        self.user_entry.focus_set()
+
+    def reset(self):
+        self.user_entry.delete(0, "end")
+        self.pass_entry.delete(0, "end")
+        self.error_lbl.pack_forget()
+        self.user_entry.focus_set()
 
     def refresh_theme(self):
         """Rebuild with current theme colors — called after a theme toggle so the login
@@ -1152,12 +1280,23 @@ class LoginFrame(tk.Frame):
         from auth import verify_password
         username = self.user_entry.get().strip()
         password = self.pass_entry.get()
+
+        # If the user pressed Enter from the username field (or clicked the button)
+        # with no password yet, nudge them to the password field instead of
+        # showing the generic "wrong credentials" error.
+        if not password:
+            self.error_lbl.configure(text="Mot de passe requis.")
+            self.error_lbl.pack(pady=(4, 0))
+            self.pass_entry.focus_set()
+            return
+
         conn = get_connection()
         row = conn.execute("SELECT * FROM users WHERE username=?", (username,)).fetchone()
         conn.close()
         if row and verify_password(password, row["password_hash"], row["salt"]):
             self.app.do_login(row)
         else:
+            self.error_lbl.configure(text="Identifiant ou mot de passe incorrect.")
             self.error_lbl.pack(pady=(4, 0))
 
 
@@ -1420,7 +1559,7 @@ class BasePage(tk.Frame):
         button.configure(bg=button._rest_bg, fg=button._rest_fg,
                           highlightbackground=RED if active else BORDER)
 
-    def show_detail_modal(self, title, build_content_fn, on_edit, width=480):
+    def show_detail_modal(self, title, build_content_fn, on_edit, on_history=None, width=480):
         """Fenêtre de consultation en lecture seule : affiche les infos proprement,
         avec un bouton Modifier explicite pour passer au formulaire d'édition —
         on ne tombe jamais directement en mode modification."""
@@ -1430,6 +1569,13 @@ class BasePage(tk.Frame):
         def go_edit():
             modal.destroy()
             on_edit()
+
+        if on_history is not None:
+            def go_history():
+                modal.destroy()
+                on_history()
+            outline_button(modal.footer, "Historique", go_history, icon="clock").pack(
+                side="left", ipady=4, padx=(0, 8))
 
         primary_button(modal.footer, "Modifier", go_edit, icon="edit").pack(
             side="left", fill="x", expand=True, ipady=4, padx=(0, 8))
@@ -1519,6 +1665,32 @@ class ModalForm(tk.Toplevel):
         self.footer.pack(fill="x", side="bottom")
 
         self.protocol("WM_DELETE_WINDOW", self._on_close)
+        self.center()
+
+    def center(self):
+        """Center this modal over the app window. Call again after any .geometry(...)
+        change so the modal re-centers with its new size."""
+        self.update_idletasks()
+        try:
+            pw = self.app.winfo_width()
+            ph = self.app.winfo_height()
+            px = self.app.winfo_rootx()
+            py = self.app.winfo_rooty()
+        except Exception:
+            return
+        if pw <= 1:
+            pw = self.app.winfo_screenwidth()
+        if ph <= 1:
+            ph = self.app.winfo_screenheight()
+        w = self.winfo_width()
+        h = self.winfo_height()
+        if w <= 1:
+            w = self.winfo_reqwidth()
+        if h <= 1:
+            h = self.winfo_reqheight()
+        x = px + max(0, (pw - w) // 2)
+        y = py + max(0, (ph - h) // 2)
+        self.geometry(f"+{x}+{y}")
 
     def _bind_wheel(self):
         self._canvas.bind_all("<MouseWheel>", self._on_mousewheel)
@@ -1550,11 +1722,56 @@ class ModalForm(tk.Toplevel):
 
 # ================================================================== DASHBOARD
 class DashboardPage(BasePage):
-    def refresh(self):
-        for w in self.winfo_children():
-            w.destroy()
+    def __init__(self, parent, app):
+        super().__init__(parent, app)
+        # Header lives directly on the page and is built once — it stays fixed at the
+        # top while everything below it scrolls.
         self.header("Aperçu", "Tableau de bord")
-        export_row = tk.Frame(self, bg=CONTENT_BG)
+
+        # Scrollable container below the header.
+        self._canvas = tk.Canvas(self, bg=CONTENT_BG, highlightthickness=0)
+        vsb = ttk.Scrollbar(self, orient="vertical", command=self._canvas.yview,
+            style="Custom.Vertical.TScrollbar")
+        self._canvas.configure(yscrollcommand=vsb.set)
+        self._canvas.pack(side="left", fill="both", expand=True)
+        vsb.pack(side="right", fill="y")
+
+        self.scroll_body = tk.Frame(self._canvas, bg=CONTENT_BG)
+        self._body_window = self._canvas.create_window((0, 0), window=self.scroll_body, anchor="nw")
+
+        def on_body_config(_e):
+            self._canvas.configure(scrollregion=self._canvas.bbox("all"))
+        self.scroll_body.bind("<Configure>", on_body_config)
+
+        def on_canvas_config(e):
+            # keep the inner frame as wide as the canvas so fill="x" works inside it
+            self._canvas.itemconfig(self._body_window, width=e.width)
+        self._canvas.bind("<Configure>", on_canvas_config)
+
+        # Wheel only while the pointer is over the dashboard — mirrors ModalForm's pattern,
+        # so opening a modal doesn't hijack scrolling here or vice versa.
+        self._canvas.bind("<Enter>", lambda e: self._bind_wheel())
+        self._canvas.bind("<Leave>", lambda e: self._unbind_wheel())
+
+    def _bind_wheel(self):
+        self._canvas.bind_all("<MouseWheel>", self._on_wheel)
+        self._canvas.bind_all("<Button-4>", self._on_wheel)
+        self._canvas.bind_all("<Button-5>", self._on_wheel)
+
+    def _unbind_wheel(self):
+        self._canvas.unbind_all("<MouseWheel>")
+        self._canvas.unbind_all("<Button-4>")
+        self._canvas.unbind_all("<Button-5>")
+
+    def _on_wheel(self, e):
+        delta = -1 if (getattr(e, "num", None) == 4 or getattr(e, "delta", 0) > 0) else 1
+        self._canvas.yview_scroll(delta, "units")
+
+    def refresh(self):
+        for w in self.scroll_body.winfo_children():
+            w.destroy()
+        
+        export_row = tk.Frame(self.scroll_body, bg=CONTENT_BG)
         export_row.pack(fill="x", pady=(0, 16))
         outline_button(export_row, "Exporter calendrier (.ics)", self.export_calendar, icon="calendar").pack(side="right")
 
@@ -1565,7 +1782,10 @@ class DashboardPage(BasePage):
         avances = sum(s["avance"] or 0 for s in month_sales)
         all_sales = conn.execute("SELECT * FROM sales").fetchall()
         credit = sum((s["vente"] or 0) - (s["avance"] or 0) for s in all_sales)
-        month_exp = conn.execute("SELECT * FROM expenses WHERE date LIKE ? AND personnelle=0", (ym + "%",)).fetchall()
+        month_exp = conn.execute(
+            "SELECT * FROM expenses WHERE personnelle=0 AND (recurrent=1 OR date LIKE ?)",
+            (ym + "%",)
+        ).fetchall()
         charges = sum(x["montant"] or 0 for x in month_exp)
         dispo = avances - charges
 
@@ -1579,12 +1799,14 @@ class DashboardPage(BasePage):
         commande_alerts = [c for c in commandes_rows if CommandesPage.alert_state(c)]
         commande_alerts.sort(key=lambda c: c["date_prevue"] or "")
 
+        expense_alerts = self._expense_alerts(conn)
+
         recent_factures = conn.execute("SELECT * FROM factures ORDER BY date DESC LIMIT 4").fetchall() \
             if self.app.is_admin() else []
         conn.close()
 
         if self.app.is_admin():
-            kpi_row = tk.Frame(self, bg=CONTENT_BG)
+            kpi_row = tk.Frame(self.scroll_body, bg=CONTENT_BG)
             kpi_row.pack(fill="x", pady=(0, 20))
             self._kpi(kpi_row, "CA du mois", money(ca), icon="sales")
             self._kpi(kpi_row, "Avances encaissées", money(avances), icon="wallet")
@@ -1595,25 +1817,29 @@ class DashboardPage(BasePage):
         card_specs = []
         if self.app.is_admin():
             card_specs.append(("Disponible net", "growth", lambda card: self._build_dispo(card, dispo)))
-        card_specs.append(("Rendez-vous aujourd'hui", "calendar", lambda card: self._build_list(
+            card_specs.append(("Chiffre d'affaires", "sales", lambda card: self._build_dispo(card, ca)))
+            card_specs.append(("Rendez-vous aujourd'hui", "calendar", lambda card: self._build_list(
             card, today_appts, "Aucun rendez-vous aujourd'hui.",
-            lambda a: (f"{a['heure']} — {a['client_nom']}", a["statut"], SLATE))))
-        card_specs.append(("Alertes stock", "warning", lambda card: self._build_list(
+                lambda a: (f"{a['heure']} — {a['client_nom']}", a["statut"], SLATE))))
+            card_specs.append(("Alertes stock", "warning", lambda card: self._build_list(
             card, low_stock, "Tout le stock est suffisant.",
-            lambda s: (s["nom"], f"{s['qte']} restant(s)", RED))))
-        card_specs.append(("Commandes à suivre", "package", lambda card: self._build_list(
+                lambda s: (s["nom"], f"{s['qte']} restant(s)", RED))))
+            card_specs.append(("Commandes à suivre", "package", lambda card: self._build_list(
             card, commande_alerts[:6], "Aucune commande urgente.",
-            lambda c: (
-                ((c["fournisseur"] if (c["type"] or "client") == "fournisseur"
-                  else f"{c['client_nom'] or ''} {c['client_prenom'] or ''}".strip()) or "—")
-                + (f" — {c['description']}" if c["description"] else ""),
-                "EN RETARD" if CommandesPage.alert_state(c) == "overdue" else "BIENTÔT", RED))))
+                 lambda c: (
+                    ((c["fournisseur"] if (c["type"] or "client") == "fournisseur"
+                        else f"{c['client_nom'] or ''} {c['client_prenom'] or ''}".strip()) or "—")
+                        + (f" — {c['description']}" if c["description"] else ""),
+                    "EN RETARD" if CommandesPage.alert_state(c) == "overdue" else "BIENTÔT", RED))))
+            card_specs.append(("Dépenses à payer", "wallet", lambda card: self._build_list(
+            card, expense_alerts[:6], "Aucune échéance proche.",
+            lambda pair: self._expense_alert_row(pair))))
         if self.app.is_admin():
             card_specs.append(("Factures récentes", "document", lambda card: self._build_list(
                 card, recent_factures, "Aucune facture enregistrée.",
                 lambda f: (f["titre"] or "—", money(f["montant"]), SLATE))))
 
-        grid_wrap = tk.Frame(self, bg=CONTENT_BG)
+        grid_wrap = tk.Frame(self.scroll_body, bg=CONTENT_BG)
         grid_wrap.pack(fill="both", expand=True)
         grid_wrap.grid_columnconfigure(0, weight=1)
         grid_wrap.grid_columnconfigure(1, weight=1)
@@ -1624,6 +1850,43 @@ class DashboardPage(BasePage):
                       padx=(0, 8) if col == 0 else (8, 0), pady=(0, 16))
             self._card_title(card, title, icon)
             builder(card)
+
+    EXPENSE_ALERT_DAYS = 7
+
+    def _expense_alerts(self, conn):
+        """All charges not yet paid for the current month, sorted: overdue first,
+        then soonest due date, then charges with no due date."""
+        rows = conn.execute("SELECT * FROM expenses").fetchall()
+        today = datetime.date.today()
+        out = []
+        for x in rows:
+            if expense_is_paid_this_month(x):
+                continue
+            due = x["date_echeance"] or ""
+            if due:
+                try:
+                    days_left = (datetime.date.fromisoformat(due) - today).days
+                except ValueError:
+                    days_left = None
+            else:
+                days_left = None
+            out.append((days_left, x))
+        out.sort(key=lambda pair: (pair[0] is None, pair[0] if pair[0] is not None else 0))
+        return out
+
+    @staticmethod
+    def _expense_alert_row(pair):
+        days_left, x = pair
+        if days_left is None:
+            when, color = "à payer", SLATE
+        elif days_left < 0:
+            when, color = f"EN RETARD ({-days_left}j)", RED
+        elif days_left <= 7:
+            # due within a week (or today) → red
+            when, color = ("AUJOURD'HUI" if days_left == 0 else f"dans {days_left}j"), RED
+        else:
+            when, color = f"dans {days_left}j", SLATE
+        return (f"{x['libelle']} — {money(x['montant'])}", when, color)
 
     def _build_dispo(self, card, dispo):
         tk.Label(card, text="Avances − Charges fixes", font=FONT_MONO_SM, bg=SURFACE, fg=SLATE).pack(anchor="w", pady=(0, 10))
@@ -1778,6 +2041,8 @@ class ClientsPage(BasePage):
             n += 1
         conn.close()
 
+        
+
     def delete_selected(self):
         cid = self._selected_id()
         if not cid:
@@ -1835,7 +2100,11 @@ class ClientsPage(BasePage):
                 self.info_row(body, "Prescripteur", rxg("prescripteur"))
                 self.info_row(body, "Mutuelle", "Oui — " + rxg("mutuelle_texte") if rx["mutuelle_oui"] else "Non")
                 self.info_row(body, "Maladie", "Oui — " + rxg("maladie_texte") if rx["maladie_oui"] else "Non")
-                self.info_row(body, "Montage", "Oui" if rx["montage_oui"] else "Non")
+                if rx["montage_oui"]:
+                    montage_display = "Oui" + (" — " + rx["montage_texte"] if rx["montage_texte"] else "")
+                else:
+                    montage_display = "Non"
+                self.info_row(body, "Montage", montage_display)
 
                 self.section_label(body, "Correction")
                 table = tk.Frame(body, bg=SURFACE)
@@ -1865,7 +2134,117 @@ class ClientsPage(BasePage):
                           font=FONT_MONO_SM, bg=SURFACE, fg=SLATE).pack(anchor="w")
 
         title = f"{c['nom']} {c['prenom'] or ''}".strip() or "Fiche client"
-        self.show_detail_modal(title, build, lambda: self.open_form(client_id), width=480)
+        self.show_detail_modal(title, build,
+                                lambda: self.open_form(client_id),
+                                on_history=lambda: self.open_history(client_id),
+                                width=480)
+
+    def open_history(self, client_id):
+        """Historique complet : chaque prescription est affichée comme une fiche
+        complète (ARX, AV. Brute, Suivi, Correction, Verres/Firme/Monture, Prix),
+        empilée de la plus récente à la plus ancienne."""
+        conn = get_connection()
+        c = conn.execute("SELECT * FROM clients WHERE id=?", (client_id,)).fetchone()
+        rxs = conn.execute("SELECT * FROM prescriptions WHERE client_id=? ORDER BY id DESC",
+                            (client_id,)).fetchall()
+        conn.close()
+        if not c:
+            return
+
+        name = f"{c['nom']} {c['prenom'] or ''}".strip() or "Client"
+        modal = ModalForm(self.app, f"Historique — {name}", width=820)
+        modal.geometry("820x680")
+        modal.center()
+
+        tk.Label(modal.body, text=f"{len(rxs)} fiche(s) enregistrée(s)",
+                 font=FONT_MONO_SM, fg=SLATE, bg=SURFACE).pack(anchor="w", pady=(0, 10))
+
+        if not rxs:
+            tk.Label(modal.body, text="Aucune fiche enregistrée pour ce client.",
+                     font=FONT_BODY, fg=SLATE, bg=SURFACE).pack(anchor="w", pady=20)
+            outline_button(modal.footer, "Fermer", modal.destroy, icon="close").pack(side="left", ipady=4)
+            return
+
+        def g(rx, key, default="—"):
+            try:
+                v = rx[key]
+                return v if v not in (None, "") else default
+            except (KeyError, IndexError, TypeError):
+                return default
+
+        def info(parent, label, value):
+            row = tk.Frame(parent, bg=SURFACE)
+            row.pack(fill="x", pady=2)
+            tk.Label(row, text=label.upper(), font=FONT_MONO_SM, bg=SURFACE, fg=SLATE).pack(side="left")
+            tk.Label(row, text=value if value not in (None, "") else "—", font=FONT_BODY_B,
+                     bg=SURFACE, fg=TEXT, wraplength=460, justify="right").pack(side="right")
+
+        def section(parent, text):
+            tk.Label(parent, text=text, font=FONT_MONO_SM, fg=RED, bg=SURFACE).pack(anchor="w", pady=(8, 2))
+
+        for rx in rxs:
+            card = tk.Frame(modal.body, bg=SURFACE, highlightbackground=BORDER,
+                             highlightthickness=1, padx=16, pady=14)
+            card.pack(fill="x", pady=(0, 14))
+
+            # En-tête : date + badges E.F.H
+            head = tk.Frame(card, bg=SURFACE)
+            head.pack(fill="x", pady=(0, 4))
+            tk.Label(head, text=rx["date"] or "—", font=FONT_DISPLAY_SM,
+                     bg=SURFACE, fg=TEXT).pack(side="left")
+            efh = " · ".join(lbl for lbl, on in (("VL", rx["vl"]), ("VP", rx["vp"]), ("PG", rx["pg"])) if on)
+            if efh:
+                tk.Label(head, text=efh, font=FONT_MONO_SM, bg=SURFACE, fg=RED).pack(side="right")
+
+            section(card, "ARX")
+            info(card, "OD", g(rx, "arx_od"))
+            info(card, "OG", g(rx, "arx_og"))
+
+            section(card, "AV. Brute")
+            info(card, "OD / OG / ODG", f"{g(rx, 'av_od')} / {g(rx, 'av_og')} / {g(rx, 'av_odg')}")
+
+            section(card, "Suivi")
+            info(card, "Prescripteur", g(rx, "prescripteur"))
+            info(card, "Date prescription", g(rx, "date_prescription"))
+            info(card, "Mutuelle",
+                 ("Oui — " + g(rx, "mutuelle_texte")) if rx["mutuelle_oui"] else "Non")
+            info(card, "Maladie",
+                 ("Oui — " + g(rx, "maladie_texte")) if rx["maladie_oui"] else "Non")
+            if rx["montage_oui"]:
+                montage_display = "Oui" + (" — " + g(rx, "montage_texte", "") if g(rx, "montage_texte", "") else "")
+            else:
+                montage_display = "Non"
+            info(card, "Montage", montage_display)
+
+            section(card, "Correction")
+            tbl = tk.Frame(card, bg=SURFACE)
+            tbl.pack(fill="x", pady=(0, 4))
+            cols = ["", "SPH", "CYL", "AXE", "ADD", "EP", "HT"]
+            for i, h in enumerate(cols):
+                tk.Label(tbl, text=h, font=FONT_MONO_SM, fg=SLATE, bg=SURFACE
+                          ).grid(row=0, column=i, padx=6)
+                tbl.grid_columnconfigure(i, weight=1)
+            for r, eye in ((1, "od"), (2, "og")):
+                tk.Label(tbl, text=eye.upper(), font=FONT_BODY_B, fg=TEXT,
+                          bg=SURFACE).grid(row=r, column=0)
+                for i, key in enumerate(("sph", "cyl", "axe", "add", "ep", "ht"), start=1):
+                    tk.Label(tbl, text=g(rx, f"{eye}_{key}"), font=FONT_MONO_SM,
+                              fg=TEXT, bg=SURFACE).grid(row=r, column=i, padx=6, pady=2)
+
+            section(card, "Verres / Firme / Monture")
+            v_txt = (g(rx, "verres_texte") + ("  ✓" if rx["verres_check"] else "")).strip()
+            f_txt = (g(rx, "firme_texte") + ("  ✓" if rx["firme_check"] else "")).strip()
+            m_txt = (g(rx, "monture_texte") + ("  ✓" if rx["monture_check"] else "")).strip()
+            info(card, "Verres", v_txt)
+            info(card, "Firme", f_txt)
+            info(card, "Monture", m_txt)
+
+            section(card, "Prix")
+            info(card, "Prix / Avance", f"{g(rx, 'prix')} / {g(rx, 'avance')}")
+            info(card, "Jour de livraison", g(rx, "jour_livraison"))
+            info(card, "R", g(rx, "r_texte"))
+
+        outline_button(modal.footer, "Fermer", modal.destroy, icon="close").pack(side="left", ipady=4)
 
     def open_form(self, client_id=None):
         conn = get_connection()
@@ -1897,7 +2276,7 @@ class ClientsPage(BasePage):
         row2.grid_columnconfigure(0, weight=1); row2.grid_columnconfigure(1, weight=1)
         naiss_wrap = tk.Frame(row2, bg=SURFACE); naiss_wrap.grid(row=0, column=0, sticky="ew", padx=(0, 6))
         ville_wrap = tk.Frame(row2, bg=SURFACE); ville_wrap.grid(row=0, column=1, sticky="ew", padx=(6, 0))
-        naiss_e = field(naiss_wrap, "Né(e) le", c["date_naissance"] if c else "")
+        naiss_e = field_date(naiss_wrap, "Né(e) le", c["date_naissance"] if c else "")
         ville_e = field(ville_wrap, "Ville", c["ville"] if c else "")
 
         row3 = tk.Frame(body, bg=SURFACE); row3.pack(fill="x")
@@ -1949,13 +2328,14 @@ class ClientsPage(BasePage):
         presc_wrap = tk.Frame(presc_row, bg=SURFACE); presc_wrap.grid(row=0, column=0, sticky="ew", padx=(0, 6))
         presc_date_wrap = tk.Frame(presc_row, bg=SURFACE); presc_date_wrap.grid(row=0, column=1, sticky="ew", padx=(6, 0))
         prescripteur_e = field(presc_wrap, "Prescripteur", rxg("prescripteur"))
-        presc_date_e = field(presc_date_wrap, "Le", rxg("date_prescription", today_iso()))
+        presc_date_e = field_date(presc_date_wrap, "Le", rxg("date_prescription", today_iso()))
 
         mutuelle_var = oui_non(body, "Mutuelle", bool(rxg("mutuelle_oui", 0)))
         mutuelle_txt_e = field(body, "Mutuelle — précisions", rxg("mutuelle_texte"))
         maladie_var = oui_non(body, "Maladie", bool(rxg("maladie_oui", 0)))
         maladie_txt_e = field(body, "Maladie — précisions", rxg("maladie_texte"))
         montage_var = oui_non(body, "Montage", bool(rxg("montage_oui", 0)))
+        montage_txt_e = field(body, "Montage — précisions", rxg("montage_texte"))
 
         tk.Frame(body, bg=BORDER, height=1).pack(fill="x", pady=(12, 10))
 
@@ -2032,18 +2412,18 @@ class ClientsPage(BasePage):
             conn.execute("""INSERT INTO prescriptions (
                 client_id, date, vl, vp, pg, arx_od, arx_og, av_od, av_og, av_odg,
                 prescripteur, date_prescription, mutuelle_oui, mutuelle_texte,
-                maladie_oui, maladie_texte, montage_oui,
+                maladie_oui, maladie_texte, montage_oui, montage_texte,
                 od_sph, od_cyl, od_axe, od_add, od_ep, od_ht,
                 og_sph, og_cyl, og_axe, og_add, og_ep, og_ht,
                 verres_texte, verres_check, firme_texte, firme_check, monture_texte, monture_check,
                 prix, avance, jour_livraison, r_texte
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
                 cid, today_iso(), int(vl_var.get()), int(vp_var.get()), int(pg_var.get()),
                 arx_od_e.get(), arx_og_e.get(), av_od_e.get(), av_og_e.get(), av_odg_e.get(),
                 prescripteur_e.get(), presc_date_e.get(),
                 1 if mutuelle_var.get() == "oui" else 0, mutuelle_txt_e.get(),
                 1 if maladie_var.get() == "oui" else 0, maladie_txt_e.get(),
-                1 if montage_var.get() == "oui" else 0,
+                1 if montage_var.get() == "oui" else 0, montage_txt_e.get(),
                 od_sph.get(), od_cyl.get(), od_axe.get(), od_add.get(), od_ep.get(), od_ht.get(),
                 og_sph.get(), og_cyl.get(), og_axe.get(), og_add.get(), og_ep.get(), og_ht.get(),
                 verres_e.get(), int(verres_c.get()), firme_e.get(), int(firme_c.get()),
@@ -2142,7 +2522,7 @@ class AppointmentsPage(BasePage):
         cb = ttk.Combobox(body, textvariable=client_var, values=client_names, font=FONT_BODY, style="Themed.TCombobox")
         cb.pack(fill="x", ipady=2)
 
-        date_e = field(body, "Date (AAAA-MM-JJ)", a["date"] if a else today_iso())
+        date_e = field_date(body, "Date (AAAA-MM-JJ)", a["date"] if a else today_iso())
         heure_e = field(body, "Heure (HH:MM)", a["heure"] if a else "10:00")
         service_v = dropdown(body, "Service", SERVICES_RDV, a["service"] if a else SERVICES_RDV[0])
         statut_v = dropdown(body, "Statut", STATUTS_RDV, a["statut"] if a else STATUTS_RDV[0])
@@ -3037,7 +3417,8 @@ class ExpensesPage(BasePage):
         self.btn_personal.pack(side="left")
 
         self.search_var = self.make_search_box("Rechercher une dépense…")
-        self.tree = self.make_table(["Date", "Libellé", "Catégorie", "Montant", "Échéance", "Récurrent"])
+        self.tree = self.make_table(["Date", "Libellé", "Catégorie", "Montant", "Échéance", "Récurrent", "Payé"])
+        self.tree.tag_configure("paid", background="#E8F5EC", foreground="#2E7D46")
         self.tree.bind("<Double-1>", lambda e: self.open_form(self._selected_id()))
         btns = tk.Frame(self, bg=CONTENT_BG)
         btns.pack(fill="x", pady=(8, 0))
@@ -3058,6 +3439,8 @@ class ExpensesPage(BasePage):
         sel = self.tree.selection()
         return int(sel[0]) if sel else None
 
+    ALERT_DAYS = 3
+
     def refresh(self):
         for i in self.tree.get_children():
             self.tree.delete(i)
@@ -3066,13 +3449,29 @@ class ExpensesPage(BasePage):
         rows = conn.execute("SELECT * FROM expenses WHERE personnelle=? ORDER BY date DESC",
                              (int(self.show_personal),)).fetchall()
         conn.close()
+        today = datetime.date.today()
         n = 0
         for x in rows:
             if not self.row_matches(q, x["libelle"], x["categorie"]):
                 continue
-            self.tree.insert("", "end", iid=str(x["id"]), tags=("even" if n % 2 == 0 else "odd",),
+            paid = expense_is_paid_this_month(x)
+            if paid:
+                tag = "paid"
+            elif x["date_echeance"]:
+                try:
+                    days_left = (datetime.date.fromisoformat(x["date_echeance"]) - today).days
+                except ValueError:
+                    days_left = None
+                if days_left is not None and days_left <= self.ALERT_DAYS:
+                    tag = "low"
+                else:
+                    tag = "even" if n % 2 == 0 else "odd"
+            else:
+                tag = "even" if n % 2 == 0 else "odd"
+            self.tree.insert("", "end", iid=str(x["id"]), tags=(tag,),
                               values=(x["date"], x["libelle"], x["categorie"], money(x["montant"]),
-                                      x["date_echeance"] or "—", "Oui" if x["recurrent"] else "Non"))
+                                      x["date_echeance"] or "—", "Oui" if x["recurrent"] else "Non",
+                                      "Oui" if paid else "Non"))
             n += 1
 
     def delete_selected(self):
@@ -3100,8 +3499,8 @@ class ExpensesPage(BasePage):
         libelle_e = field(body, "Libellé", x["libelle"] if x else "")
         cat_v = dropdown(body, "Catégorie", cats, x["categorie"] if x else cats[0])
         montant_e = field(body, "Montant (DH)", str(x["montant"]) if x else "0")
-        date_e = field(body, "Date", x["date"] if x else today_iso())
-        echeance_e = field(body, "Échéance (rappel, optionnel)", x["date_echeance"] if x and x["date_echeance"] else "")
+        date_e = field_date(body, "Date", x["date"] if x else today_iso())
+        echeance_e = field_date(body, "Échéance (rappel, optionnel)", x["date_echeance"] if x and x["date_echeance"] else "")
         recur_var = tk.BooleanVar(value=bool(x["recurrent"]) if x else False)
         tk.Checkbutton(body, text="Dépense récurrente (mensuelle)", variable=recur_var, bg=SURFACE,
                        fg=TEXT, activebackground=SURFACE, activeforeground=TEXT,
@@ -3110,6 +3509,8 @@ class ExpensesPage(BasePage):
         tk.Checkbutton(body, text="Dépense personnelle (hors entreprise)", variable=personal_var, bg=SURFACE,
                        fg=TEXT, activebackground=SURFACE, activeforeground=TEXT,
                        selectcolor=SURFACE, font=FONT_BODY).pack(anchor="w", pady=(4, 0))
+        paid_var = oui_non(body, "Payé",
+                        expense_is_paid_this_month(x) if x else False)
 
         def save():
             libelle = libelle_e.get().strip()
@@ -3122,18 +3523,33 @@ class ExpensesPage(BasePage):
                 messagebox.showwarning("Valeur invalide", "Montant invalide.")
                 return
             conn = get_connection()
+            paid_val = 1 if paid_var.get() == "oui" else 0
+            # For a recurring charge marked paid, remember *which* month this payment
+            # covers. For non-recurring or unpaid, leave paye_mois as it was / null.
+            if paid_val and int(recur_var.get()):
+                paye_mois_val = datetime.date.today().strftime("%Y-%m")
+            elif paid_val:
+                paye_mois_val = None  # one-off; paye_mois is unused
+            else:
+                # marked unpaid → clear the month marker too
+                paye_mois_val = None
+
             if x:
                 conn.execute("""UPDATE expenses SET libelle=?, categorie=?, montant=?, date=?, recurrent=?,
-                                 date_echeance=?, personnelle=? WHERE id=?""",
+                                 date_echeance=?, personnelle=?, paye=?, paye_mois=? WHERE id=?""",
                              (libelle, cat_v.get(), montant, date_e.get(), int(recur_var.get()),
-                              echeance_e.get() or None, int(personal_var.get()), x["id"]))
+                              echeance_e.get() or None, int(personal_var.get()), paid_val,
+                              paye_mois_val, x["id"]))
                 action = f"Dépense modifiée : {libelle}"
             else:
-                conn.execute("""INSERT INTO expenses (date,libelle,categorie,montant,recurrent,date_echeance,personnelle)
-                                 VALUES (?,?,?,?,?,?,?)""",
+                conn.execute("""INSERT INTO expenses (date,libelle,categorie,montant,recurrent,
+                                 date_echeance,personnelle,paye,paye_mois)
+                                 VALUES (?,?,?,?,?,?,?,?,?)""",
                              (date_e.get(), libelle, cat_v.get(), montant, int(recur_var.get()),
-                              echeance_e.get() or None, int(personal_var.get())))
+                              echeance_e.get() or None, int(personal_var.get()), paid_val,
+                              paye_mois_val))
                 action = f"Dépense créée : {libelle} ({money(montant)})"
+
             conn.commit(); conn.close()
             log_action(self.app.current_user["username"], action)
             modal.destroy()
@@ -3259,7 +3675,6 @@ class UsersPage(BasePage):
 
         modal.buttons(save)
 
-
 # ================================================================== TYPES & PRODUITS (admin only)
 # ================================================================== FACTURES
 class FacturesPage(BasePage):
@@ -3355,7 +3770,7 @@ class FacturesPage(BasePage):
         row.grid_columnconfigure(0, weight=1); row.grid_columnconfigure(1, weight=1)
         date_wrap = tk.Frame(row, bg=SURFACE); date_wrap.grid(row=0, column=0, sticky="ew", padx=(0, 6))
         montant_wrap = tk.Frame(row, bg=SURFACE); montant_wrap.grid(row=0, column=1, sticky="ew", padx=(6, 0))
-        date_e = field(date_wrap, "Date", f["date"] if f else today_iso())
+        date_e = field_date(date_wrap, "Date", f["date"] if f else today_iso())
         montant_e = field(montant_wrap, "Montant (DH)", str(f["montant"]) if f else "0")
         notes_e = field(body, "Notes (optionnel)", f["notes"] if f and f["notes"] else "")
 
@@ -3625,8 +4040,8 @@ class CommandesPage(BasePage):
         row.grid_columnconfigure(0, weight=1); row.grid_columnconfigure(1, weight=1)
         cmd_wrap = tk.Frame(row, bg=SURFACE); cmd_wrap.grid(row=0, column=0, sticky="ew", padx=(0, 6))
         prevue_wrap = tk.Frame(row, bg=SURFACE); prevue_wrap.grid(row=0, column=1, sticky="ew", padx=(6, 0))
-        date_cmd_e = field(cmd_wrap, "Commandée le", cmd["date_commande"] if cmd else today_iso())
-        date_prevue_e = field(prevue_wrap, "Prévue le", cmd["date_prevue"] if cmd else "")
+        date_cmd_e = field_date(cmd_wrap, "Commandée le", cmd["date_commande"] if cmd else today_iso())
+        date_prevue_e = field_date(prevue_wrap, "Prévue le", cmd["date_prevue"] if cmd else "")
         statut_v = dropdown(body, "Statut", STATUTS_COMMANDE, cmd["statut"] if cmd else STATUTS_COMMANDE[0])
 
         def save():

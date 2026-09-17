@@ -143,6 +143,8 @@ MIGRATIONS = [
 
     "ALTER TABLE expenses ADD COLUMN personnelle INTEGER DEFAULT 0",
     "ALTER TABLE expenses ADD COLUMN date_echeance TEXT",
+    "ALTER TABLE expenses ADD COLUMN paye INTEGER DEFAULT 0",
+    "ALTER TABLE expenses ADD COLUMN paye_mois TEXT",
 
     # Fiche client complète (copie 1:1 du formulaire papier)
     "ALTER TABLE prescriptions ADD COLUMN vl INTEGER DEFAULT 0",
@@ -160,6 +162,7 @@ MIGRATIONS = [
     "ALTER TABLE prescriptions ADD COLUMN maladie_oui INTEGER DEFAULT 0",
     "ALTER TABLE prescriptions ADD COLUMN maladie_texte TEXT",
     "ALTER TABLE prescriptions ADD COLUMN montage_oui INTEGER DEFAULT 0",
+    "ALTER TABLE prescriptions ADD COLUMN montage_texte TEXT",
     "ALTER TABLE prescriptions ADD COLUMN od_sph TEXT",
     "ALTER TABLE prescriptions ADD COLUMN od_cyl TEXT",
     "ALTER TABLE prescriptions ADD COLUMN od_axe TEXT",
@@ -185,6 +188,7 @@ MIGRATIONS = [
 
     "ALTER TABLE commandes ADD COLUMN type TEXT DEFAULT 'client'",
     "ALTER TABLE commandes ADD COLUMN fournisseur TEXT",
+
 ]
 
 DEFAULT_TYPES = {
