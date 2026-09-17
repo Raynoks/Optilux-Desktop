@@ -1817,7 +1817,7 @@ class DashboardPage(BasePage):
         card_specs = []
         if self.app.is_admin():
             card_specs.append(("Disponible net", "growth", lambda card: self._build_dispo(card, dispo)))
-            card_specs.append(("Chiffre d'affaires", "sales", lambda card: self._build_dispo(card, ca)))
+            card_specs.append(("Chiffre d'affaires", "sales", lambda card: self._build_ca(card, ca)))
             card_specs.append(("Rendez-vous aujourd'hui", "calendar", lambda card: self._build_list(
             card, today_appts, "Aucun rendez-vous aujourd'hui.",
                 lambda a: (f"{a['heure']} — {a['client_nom']}", a["statut"], SLATE))))
@@ -1891,6 +1891,10 @@ class DashboardPage(BasePage):
     def _build_dispo(self, card, dispo):
         tk.Label(card, text="Avances − Charges fixes", font=FONT_MONO_SM, bg=SURFACE, fg=SLATE).pack(anchor="w", pady=(0, 10))
         tk.Label(card, text=money(dispo), font=FONT_DISPLAY, bg=SURFACE, fg=RED).pack(anchor="w")
+
+    def _build_ca(self, card, ca):
+        tk.Label(card, text="Total des ventes (Crédit inclue)", font=FONT_MONO_SM, bg=SURFACE, fg=SLATE).pack(anchor="w", pady=(0, 10))
+        tk.Label(card, text=money(ca), font=FONT_DISPLAY, bg=SURFACE, fg=RED).pack(anchor="w")
 
     def _build_list(self, card, rows, empty_text, row_fn):
         """Affiche jusqu'à N lignes ; le nom passe au-dessus du statut si la ligne est
