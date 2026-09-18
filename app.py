@@ -9,8 +9,10 @@ import datetime
 import os
 import sys
 import subprocess
-from turtle import title
 import uuid
+import zipfile
+import shutil
+from lxml import etree
 
 from database import (init_db, get_connection, log_action, DB_PATH, get_setting, set_setting,
                        get_types, add_type, delete_type, DISCOUNT_OPTIONS, PRODUCT_IMAGES_DIR,
@@ -2951,7 +2953,7 @@ class SalesPage(BasePage):
         sid = self._selected_id()
         if not sid:
             messagebox.showinfo("Info", "Sélectionnez une vente pour générer la facture.")
-            return
+            return                                                                                                                                                                                           
         conn = get_connection()
         s = conn.execute("SELECT * FROM sales WHERE id=?", (sid,)).fetchone()
         c = conn.execute("SELECT * FROM clients WHERE id=?", (s["client_id"],)).fetchone() if s["client_id"] else None
@@ -2980,7 +2982,7 @@ class SalesPage(BasePage):
         open_file(path)
 
 
-def generate_facture_pdf(sale, client, rx):
+def _draw_invoice_pdf(c, sale, client, rx):
     from reportlab.lib.pagesizes import A4
     from reportlab.pdfgen import canvas
     from reportlab.lib.units import mm
@@ -2989,13 +2991,7 @@ def generate_facture_pdf(sale, client, rx):
     RED_C = HexColor("#D6293B")
     BLACK_C = HexColor("#0B0B0C")
 
-    out_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "factures")
-    os.makedirs(out_dir, exist_ok=True)
-    client_label = f"{client['nom']}_{client['prenom'] or ''}".strip("_") if client else "client"
-    fname = f"Facture_{sale['id']}_{client_label.replace(' ', '_')}.pdf"
-    path = os.path.join(out_dir, fname)
-
-    c = canvas.Canvas(path, pagesize=A4)
+    
     w, h = A4
 
     def draw_logo(x, y, align="left"):
@@ -3210,11 +3206,52 @@ def generate_facture_pdf(sale, client, rx):
     c.drawCentredString(w / 2, y - 15,
                          "RC: 148206 / PATENTE: 50405209 / IF: 24813627 / ICE: 001962144000020 / NUM : 06 49 24 94 24")
 
+def generate_facture_pdf(sale, client, rx):
+    """A4 landscape PDF with two identical invoices side by side (customer + shop copy)."""
+    from reportlab.lib.pagesizes import A4
+    from reportlab.pdfgen import canvas
+    from reportlab.lib.units import mm
+
+    out_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "factures")
+    os.makedirs(out_dir, exist_ok=True)
+    client_label = f"{client['nom']}_{client['prenom'] or ''}".strip("_") if client else "client"
+    fname = f"Facture_{sale['id']}_{client_label.replace(' ', '_')}.pdf"
+    path = os.path.join(out_dir, fname)
+
+    page_w, page_h = A4[1], A4[0]
+    logical_w, logical_h = A4
+    half_w = page_w / 2.0
+
+    scale = min(half_w / logical_w, page_h / logical_h) * 0.96
+    scaled_w = logical_w * scale
+    scaled_h = logical_h * scale
+    x_offset = (half_w - scaled_w) / 2.0
+    y_offset = (page_h - scaled_h) / 2.0
+
+    c = canvas.Canvas(path, pagesize=(page_w, page_h))
+
+    c.saveState()
+    c.translate(x_offset, y_offset)
+    c.scale(scale, scale)
+    _draw_invoice_pdf(c, sale, client, rx)
+    c.restoreState()
+
+    c.saveState()
+    c.translate(half_w + x_offset, y_offset)
+    c.scale(scale, scale)
+    _draw_invoice_pdf(c, sale, client, rx)
+    c.restoreState()
+
+    c.setDash(3, 3)
+    c.setStrokeColorRGB(0.65, 0.65, 0.65)
+    c.setLineWidth(0.4)
+    c.line(half_w, 6 * mm, half_w, page_h - 6 * mm)
+    c.setDash()
+
     c.save()
     return path
 
-
-def generate_facture_docx(sale, client, rx):
+def _draw_invoice_docx(container, sale, client, rx):
     from docx import Document
     from docx.shared import Pt, Mm, RGBColor
     from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -3237,20 +3274,8 @@ def generate_facture_docx(sale, client, rx):
                 tc_borders.append(el)
         tc_pr.append(tc_borders)
 
-    out_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "factures")
-    os.makedirs(out_dir, exist_ok=True)
-    client_label = f"{client['nom']}_{client['prenom'] or ''}".strip("_") if client else "client"
-    fname = f"Facture_{sale['id']}_{client_label.replace(' ', '_')}.docx"
-    path = os.path.join(out_dir, fname)
-
-    doc = Document()
-    section = doc.sections[0]
-    section.page_height, section.page_width = Mm(297), Mm(210)
-    for m in ("top_margin", "bottom_margin", "left_margin", "right_margin"):
-        setattr(section, m, Mm(18))
-
     # ---------- en-tête (logo texte + titre) ----------
-    header_table = doc.add_table(rows=1, cols=3)
+    header_table = container.add_table(rows=1, cols=3)
     header_table.autofit = True
     logo_path = os.path.join(ASSETS_DIR, "optilux_logo.png")
     for col_idx, align in ((0, WD_ALIGN_PARAGRAPH.LEFT), (2, WD_ALIGN_PARAGRAPH.RIGHT)):
@@ -3267,7 +3292,7 @@ def generate_facture_docx(sale, client, rx):
         run.font.size = Pt(13)
 
     year = (sale["date"] or today_iso())[:4]
-    p = doc.add_paragraph()
+    p = container.add_paragraph()
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     run = p.add_run(f"Facture N° {sale['id']} / {year}")
     run.bold = True
@@ -3275,7 +3300,7 @@ def generate_facture_docx(sale, client, rx):
     run.font.color.rgb = RED_RGB
 
     for text, size, bold in (("OPTICIENNE - OPTOMETRISTE", 11, False), ("HAOURIR Sanae", 13, True)):
-        p = doc.add_paragraph()
+        p = container.add_paragraph()
         p.alignment = WD_ALIGN_PARAGRAPH.CENTER
         run = p.add_run(text)
         run.bold = bold
@@ -3286,13 +3311,13 @@ def generate_facture_docx(sale, client, rx):
         yyyy, mm_, dd = date_str.split("-")
     except ValueError:
         yyyy, mm_, dd = year, "", ""
-    p = doc.add_paragraph()
+    p = container.add_paragraph()
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     p.add_run(f"Tanger le : {dd} / {mm_} / {yyyy}")
 
-    doc.add_paragraph()
+    container.add_paragraph()
     nom_complet = f"{client['nom']} {client['prenom'] or ''}".strip() if client else ""
-    p = doc.add_paragraph()
+    p = container.add_paragraph()
     run = p.add_run("Mr – Mme – Mlle : ")
     run2 = p.add_run(nom_complet)
     run2.bold = True
@@ -3309,7 +3334,7 @@ def generate_facture_docx(sale, client, rx):
     pres_od = (rx["od_add"] or "") if rx else ""
     pres_og = (rx["og_add"] or "") if rx else ""
 
-    vt = doc.add_table(rows=3, cols=2)
+    vt = container.add_table(rows=3, cols=2)
     vt.alignment = WD_TABLE_ALIGNMENT.CENTER
     headers = vt.rows[0].cells
     headers[0].text = "Vision de LOIN"
@@ -3329,11 +3354,11 @@ def generate_facture_docx(sale, client, rx):
         for cell in (c0, c1):
             set_cell_border(cell, top=1, left=1, right=1, bottom=1)
 
-    doc.add_paragraph()
+    container.add_paragraph()
     vl_checked = bool(rx["vl"]) if rx else False
     vp_checked = bool(rx["vp"]) if rx else False
     pg_checked = bool(rx["pg"]) if rx else False
-    p = doc.add_paragraph()
+    p = container.add_paragraph()
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     for label, checked in (("VL", vl_checked), ("VP", vp_checked), ("PROGRESSIF", pg_checked)):
         box = "\u2611" if checked else "\u2610"  # ☑ / ☐ — glyphes Unicode standards, rendus nativement par Word
@@ -3341,8 +3366,8 @@ def generate_facture_docx(sale, client, rx):
         run.bold = True
 
     # ---------- table Désignation / Prix unité / Montant TTC ----------
-    doc.add_paragraph()
-    dt = doc.add_table(rows=3, cols=3)
+    container.add_paragraph()
+    dt = container.add_table(rows=3, cols=3)
     dt.alignment = WD_TABLE_ALIGNMENT.CENTER
     hdr = dt.rows[0].cells
     for i, txt in enumerate(("Désignation", "Prix unité", "Montant TTC")):
@@ -3368,7 +3393,7 @@ def generate_facture_docx(sale, client, rx):
                 if not para.alignment and cell != row1[0] and cell != row2[0]:
                     para.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
-    tt = doc.add_table(rows=1, cols=2)
+    tt = container.add_table(rows=1, cols=2)
     tt.alignment = WD_TABLE_ALIGNMENT.CENTER
     c0, c1 = tt.rows[0].cells
     c0.text = "Cachet et signature :"
@@ -3379,30 +3404,147 @@ def generate_facture_docx(sale, client, rx):
         set_cell_border(cell, top=1, left=1, right=1, bottom=1)
 
     # ---------- montant en lettres ----------
-    doc.add_paragraph()
+    container.add_paragraph()
     words = num_to_french_words(sale["vente"]).upper()
-    p = doc.add_paragraph()
+    p = container.add_paragraph()
     run = p.add_run("\u2713  Arrêtée la présente facture à la somme de : ")
     run.bold = True
     p.add_run(f"{words} DIRHAMS.")
 
-    p = doc.add_paragraph()
+    p = container.add_paragraph()
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     run = p.add_run("NB : Tous les montants sont exprimés en Dirhams.")
     run.italic = True
     run.font.size = Pt(9)
 
-    doc.add_paragraph()
-    p = doc.add_paragraph()
+    container.add_paragraph()
+    p = container.add_paragraph()
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     run = p.add_run("ADRESSE : VIENNA MALL - B1 angle Moutanabi et Ahmed chawki - RDC N°04 - TANGER")
     run.font.size = Pt(8)
-    p2 = doc.add_paragraph()
+    p2 = container.add_paragraph()
     p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
     run2 = p2.add_run("RC: 148206 / PATENTE: 50405209 / IF: 24813627 / ICE: 001962144000020 / NUM : 06 49 24 94 24")
     run2.font.size = Pt(8)
 
-    doc.save(path)
+TEMPLATE_DOCX = os.path.join(os.path.dirname(os.path.abspath(__file__)), "modell2027.docx")
+
+W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+
+
+def _q(tag):
+    return f"{{{W_NS}}}{tag}"
+
+
+def _fill_content_controls(template_path, output_path, values):
+    """Fill Word content controls (w:sdt) by their <w:tag> value.
+    `values` maps tag name → replacement text. Names not in the map stay untouched.
+    Content controls whose tag appears twice (two side-by-side copies) get the
+    same value in both places."""
+    shutil.copy(template_path, output_path)
+
+    with zipfile.ZipFile(template_path, "r") as z:
+        doc_xml_bytes = z.read("word/document.xml")
+
+    root = etree.fromstring(doc_xml_bytes)
+    xml_space = "{http://www.w3.org/XML/1998/namespace}space"
+    filled = set()
+
+    for sdt in root.iter(_q("sdt")):
+        sdtPr = sdt.find(_q("sdtPr"))
+        if sdtPr is None:
+            continue
+        tag_el = sdtPr.find(_q("tag"))
+        if tag_el is None:
+            continue
+        name = tag_el.get(_q("val"))
+        if name not in values:
+            continue
+        content = sdt.find(_q("sdtContent"))
+        if content is None:
+            continue
+        t_els = list(content.iter(_q("t")))
+        if not t_els:
+            continue
+        t_els[0].text = str(values[name])
+        t_els[0].set(xml_space, "preserve")
+        for t in t_els[1:]:
+            t.text = ""
+        filled.add(name)
+
+    new_xml = etree.tostring(root, xml_declaration=True, encoding="UTF-8", standalone=True)
+
+    tmp_out = output_path + ".tmp"
+    with zipfile.ZipFile(tmp_out, "w", zipfile.ZIP_DEFLATED) as zout:
+        with zipfile.ZipFile(template_path, "r") as zin:
+            for item in zin.namelist():
+                data = new_xml if item == "word/document.xml" else zin.read(item)
+                zout.writestr(item, data)
+    shutil.move(tmp_out, output_path)
+    return filled
+
+
+def generate_facture_docx(sale, client, rx):
+    """Fills the Word template's content controls with the sale's data
+    and saves the result under /factures/."""
+    if not os.path.exists(TEMPLATE_DOCX):
+        raise FileNotFoundError(
+            f"Modèle Word introuvable : {TEMPLATE_DOCX}\n"
+            "Placez modell2027.docx à côté de app.py."
+        )
+
+    out_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "factures")
+    os.makedirs(out_dir, exist_ok=True)
+    client_label = f"{client['nom']}_{client['prenom'] or ''}".strip("_") if client else "client"
+    fname = f"Facture_{sale['id']}_{client_label.replace(' ', '_')}.docx"
+    path = os.path.join(out_dir, fname)
+
+    # ---------- prep values ----------
+    date_str = sale["date"] or today_iso()
+    try:
+        yyyy, mm_, dd = date_str.split("-")
+    except ValueError:
+        yyyy, mm_, dd = date_str[:4], "", ""
+
+    def fmt_loin(sph, cyl, axe):
+        if not sph and not cyl and not axe:
+            return ""
+        return f"{sph or '---'} ({cyl or '---'}) {axe or ''}".strip()
+
+    loin_od = fmt_loin(rx["od_sph"], rx["od_cyl"], rx["od_axe"]) if rx else ""
+    loin_og = fmt_loin(rx["og_sph"], rx["og_cyl"], rx["og_axe"]) if rx else ""
+    pres_od = (rx["od_add"] or "") if rx else ""
+    pres_og = (rx["og_add"] or "") if rx else ""
+
+    # ---------- mapping (names must match the content control tags in the template) ----------
+    values = {
+        "numero":     str(sale["id"]),
+        "date_jour":  date_str,
+        "client_1":   client["nom"] if client else "client",
+        "loin_od_1":  loin_od,
+        "loin_og_1":  loin_og,
+        "pres_od_1":  pres_od,
+        "pres_og_1":  pres_og,
+        "vl_1":         "☑" if bool(rx["vl"]) else "☐",
+        "vp_1":         "☑" if bool(rx["vp"]) else "☐",
+        "progressif_1":   "☑" if bool(rx["pg"]) else "☐",
+        "prix_monture_1": f"{sale['monture']:.0f},00",
+        "montant_monture_1": f"{sale['monture']:.0f},00",
+        "prix_verres_1":  f"{sale['verres']:.0f},00",
+        "montant_verres_1": f"{sale['verres']:.0f},00",
+        "total_1":        f"{sale['vente']:.0f},00",
+        "somme_lettres_1": num_to_french_words(sale["vente"]).upper(),
+        
+    }
+
+    # ---------- render ----------
+    filled = _fill_content_controls(TEMPLATE_DOCX, path, values)
+
+    # Optional: warn on the console if a field wasn't found.
+    missing = set(values) - filled
+    if missing:
+        print(f"[Word] Champs non trouvés dans le modèle : {', '.join(sorted(missing))}")
+
     return path
 
 
