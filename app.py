@@ -20,6 +20,10 @@ from database import (init_db, get_connection, log_action, DB_PATH, get_setting,
 from notifications import notify
 from whatsapp import send_whatsapp, normalize_phone
 
+
+APP_VERSION = "1.0.0"           # bump this on every release
+UPDATE_URL = "https://raw.githubusercontent.com/Raynoks/optilux/main/latest.json"
+
 ASSETS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
 ICON_ICO = os.path.join(ASSETS_DIR, "optilux.ico")
 LOGO_PNG = os.path.join(ASSETS_DIR, "optilux_logo.png")
@@ -132,10 +136,14 @@ def apply_theme(name):
 
 FONT_DISPLAY = ("Georgia", 25, "bold")
 FONT_DISPLAY_SM = ("Georgia", 18, "bold")
-FONT_BODY = ("Segoe UI", 13)
+FONT_BODY = ("Segoe UI", 13,)
 FONT_BODY_B = ("Segoe UI", 13, "bold")
-FONT_MONO = ("Consolas", 11)
+FONT_MONO = ("Consolas", 11,)
 FONT_MONO_SM = ("Consolas", 11)
+# Dashboard-specific fonts — easier to read than the small mono font used elsewhere.
+FONT_DASH_LABEL = ("Segoe UI", 11, "normal")
+FONT_DASH_TEXT  = ("Segoe UI", 12, "bold")
+FONT_DASH_VALUE = ("Georgia", 22, "bold")
 
 def CATEGORIES_STOCK(): return get_types("stock_categorie")
 def MARQUES_STOCK(): return get_types("stock_marque")
@@ -1359,6 +1367,7 @@ class MainFrame(tk.Frame):
         theme_label = " Mode sombre" if THEME_NAME == "light" else " Mode clair"
         theme_icon = "moon" if THEME_NAME == "light" else "sun"
         ghost_button(footer, theme_label, app.toggle_theme, fg=SLATE, icon=theme_icon).pack(fill="x", pady=(14, 0))
+        ghost_button(footer, " Vérifier les mises à jour", self.check_updates, fg=SLATE, icon="gear").pack(fill="x", pady=(4, 0))
         ghost_button(footer, " Déconnexion", app.do_logout, fg=SLATE, icon="logout").pack(fill="x", pady=(4, 0))
 
         # ---------------- content area ----------------
@@ -1492,6 +1501,42 @@ class MainFrame(tk.Frame):
 
         widget.bind("<Enter>", on_enter)
         widget.bind("<Leave>", on_leave)
+
+    def check_updates(self):
+        from updater import check_for_update, download_and_apply
+
+        try:
+            info = check_for_update(UPDATE_URL, APP_VERSION)
+        except Exception as e:
+            messagebox.showerror("Mise à jour", f"Impossible de contacter le serveur :\n{e}")
+            return
+
+        if info is None:
+            messagebox.showinfo("Mise à jour",
+                                f"Vous utilisez déjà la version la plus récente ({APP_VERSION}).")
+            return
+
+        notes = info.get("notes", "")
+        if not messagebox.askyesno(
+            "Mise à jour disponible",
+            f"Version {info['version']} disponible (vous avez {APP_VERSION}).\n\n"
+            f"{notes}\n\nTélécharger et installer maintenant ?\n"
+            "(L'application va se fermer — vos données ne sont pas touchées.)"
+        ):
+            return
+
+        try:
+            app_dir = os.path.dirname(os.path.abspath(__file__))
+            n = download_and_apply(info, app_dir)
+        except Exception as e:
+            messagebox.showerror("Erreur de mise à jour", f"Échec du téléchargement :\n{e}")
+            return
+
+        messagebox.showinfo(
+            "Mise à jour installée",
+            f"{n} fichier(s) mis à jour vers la version {info['version']}.\n\n"
+            "L'application va se fermer. Rouvrez-la pour utiliser la nouvelle version.")
+        self.app.destroy()
 
 
 # ================================================================== PAGE BASE
@@ -1891,31 +1936,28 @@ class DashboardPage(BasePage):
         return (f"{x['libelle']} — {money(x['montant'])}", when, color)
 
     def _build_dispo(self, card, dispo):
-        tk.Label(card, text="Avances − Charges fixes", font=FONT_MONO_SM, bg=SURFACE, fg=SLATE).pack(anchor="w", pady=(0, 10))
-        tk.Label(card, text=money(dispo), font=FONT_DISPLAY, bg=SURFACE, fg=RED).pack(anchor="w")
+        tk.Label(card, text="Avances − Charges fixes", font=FONT_DASH_TEXT, bg=SURFACE, fg=SLATE).pack(anchor="w", pady=(0, 10))
+        tk.Label(card, text=money(dispo), font=FONT_DASH_VALUE, bg=SURFACE, fg=RED).pack(anchor="w")
 
     def _build_ca(self, card, ca):
-        tk.Label(card, text="Total des ventes (Crédit inclue)", font=FONT_MONO_SM, bg=SURFACE, fg=SLATE).pack(anchor="w", pady=(0, 10))
-        tk.Label(card, text=money(ca), font=FONT_DISPLAY, bg=SURFACE, fg=RED).pack(anchor="w")
+        tk.Label(card, text="Total des ventes (Crédit inclue)", font=FONT_DASH_TEXT, bg=SURFACE, fg=SLATE).pack(anchor="w", pady=(0, 10))
+        tk.Label(card, text=money(ca), font=FONT_DASH_VALUE, bg=SURFACE, fg=RED).pack(anchor="w")
 
     def _build_list(self, card, rows, empty_text, row_fn):
-        """Affiche jusqu'à N lignes ; le nom passe au-dessus du statut si la ligne est
-        trop longue pour tenir sur une seule ligne à cette taille de police."""
         if not rows:
-            tk.Label(card, text=empty_text, font=FONT_MONO_SM, bg=SURFACE, fg=SLATE).pack(anchor="w")
+            tk.Label(card, text=empty_text, font=FONT_DASH_TEXT, bg=SURFACE, fg=SLATE).pack(anchor="w")
             return
         for item in rows:
             label_txt, status_txt, status_color = row_fn(item)
             r = tk.Frame(card, bg=SURFACE)
-            r.pack(fill="x", pady=3)
+            r.pack(fill="x", pady=4)
             if len(label_txt) > 26:
-                tk.Label(r, text=label_txt, font=FONT_MONO_SM, bg=SURFACE, fg=TEXT, anchor="w",
+                tk.Label(r, text=label_txt, font=FONT_DASH_TEXT, bg=SURFACE, fg=TEXT, anchor="w",
                           wraplength=420, justify="left").pack(fill="x")
-                tk.Label(r, text=status_txt, font=FONT_MONO_SM, bg=SURFACE, fg=status_color, anchor="w").pack(fill="x")
+                tk.Label(r, text=status_txt, font=FONT_DASH_LABEL, bg=SURFACE, fg=status_color, anchor="w").pack(fill="x")
             else:
-                tk.Label(r, text=label_txt, font=FONT_MONO_SM, bg=SURFACE, fg=TEXT).pack(side="left")
-                tk.Label(r, text=status_txt, font=FONT_MONO_SM, bg=SURFACE, fg=status_color).pack(side="right")
-
+                tk.Label(r, text=label_txt, font=FONT_DASH_TEXT, bg=SURFACE, fg=TEXT).pack(side="left")
+                tk.Label(r, text=status_txt, font=FONT_DASH_LABEL, bg=SURFACE, fg=status_color).pack(side="right")
     def export_calendar(self):
         conn = get_connection()
         today = today_iso()
@@ -1999,14 +2041,14 @@ class DashboardPage(BasePage):
         card.pack(side="left", fill="both", expand=True, padx=6)
         top = tk.Frame(card, bg=bg)
         top.pack(fill="x")
-        tk.Label(top, text=label.upper(), font=FONT_MONO_SM, bg=bg,
+        tk.Label(top, text=label.upper(), font=FONT_DASH_LABEL, bg=bg,
                   fg="white" if accent else SLATE).pack(side="left")
         icon_photo = get_icon(icon, WHITE, size=16) if icon else None
         if icon_photo:
             il = tk.Label(top, image=icon_photo, bg=bg)
             il._icon_ref = icon_photo
             il.pack(side="right")
-        tk.Label(card, text=value, font=FONT_DISPLAY_SM, bg=bg, fg=WHITE).pack(anchor="w", pady=(6, 0))
+        tk.Label(card, text=value, font=FONT_DASH_VALUE, bg=bg, fg=WHITE).pack(anchor="w", pady=(6, 0))
 
 
 # ================================================================== CLIENTS
