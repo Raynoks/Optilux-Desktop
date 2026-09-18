@@ -21,7 +21,7 @@ from notifications import notify
 from whatsapp import send_whatsapp, normalize_phone
 
 
-APP_VERSION = "1.0.0"           # bump this on every release
+APP_VERSION = "1.0.2"           # bump this on every release
 UPDATE_URL = "https://raw.githubusercontent.com/Raynoks/optilux/main/latest.json"
 
 ASSETS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
@@ -981,6 +981,7 @@ class OptiluxApp(tk.Tk):
         self.main_frame.place(relx=0, rely=0, relwidth=1, relheight=1)
         self.main_frame.tkraise()
         self._start_notifications()
+        self.after(3000, self._silent_update_check)
 
     def do_logout(self):
         log_action(self.current_user["username"], "Déconnexion")
