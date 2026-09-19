@@ -21,7 +21,7 @@ from notifications import notify
 from whatsapp import send_whatsapp, normalize_phone
 
 
-APP_VERSION = "1.0.2"           # bump this on every release
+APP_VERSION = "1.0.3"           # bump this on every release
 UPDATE_URL = "https://raw.githubusercontent.com/Raynoks/Optilux-Desktop/main/latest.json"
 
 ASSETS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
@@ -898,7 +898,7 @@ class OptiluxApp(tk.Tk):
         super().__init__()
         apply_theme(get_setting("theme", "light"))
 
-        self.title("OPTILUX — Gestion")
+        self.title("OPTILUX — Gestion (v1.0.3)")
         self.geometry("1180x740")
         self.minsize(1180, 740)
         self._center_window()
@@ -1025,6 +1025,37 @@ class OptiluxApp(tk.Tk):
         except Exception as e:
             print("Erreur vérification notifications:", e)
         self._notify_job = self.after(self.NOTIFY_INTERVAL_MS, self._run_notification_checks)
+    def _silent_update_check(self):
+        """Check for updates in the background 3 s after login. Silent unless
+        a newer version exists — then asks the user if they want to install."""
+        from updater import check_for_update
+        try:
+            info = check_for_update(UPDATE_URL, APP_VERSION)
+        except Exception:
+            return  # offline or server unreachable — don't bother the user
+        if info is None:
+            return  # already on the latest version
+
+        if not messagebox.askyesno(
+            "Mise à jour disponible",
+            f"Version {info['version']} disponible (vous avez {APP_VERSION}).\n\n"
+            f"{info.get('notes', '')}\n\nInstaller maintenant ?"
+        ):
+            return
+
+        try:
+            app_dir = os.path.dirname(os.path.abspath(__file__))
+            from updater import download_and_apply
+            n = download_and_apply(info, app_dir)
+        except Exception as e:
+            messagebox.showerror("Erreur de mise à jour", f"Échec du téléchargement :\n{e}")
+            return
+
+        messagebox.showinfo(
+            "Mise à jour installée",
+            f"{n} fichier(s) mis à jour vers la version {info['version']}.\n\n"
+            "L'application va se fermer. Rouvrez-la pour utiliser la nouvelle version.")
+        self.destroy()
 
     @staticmethod
     def find_client_phone(client_nom):
