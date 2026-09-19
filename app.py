@@ -22,7 +22,7 @@ from whatsapp import send_whatsapp, normalize_phone
 
 
 APP_VERSION = "1.0.2"           # bump this on every release
-UPDATE_URL = "https://raw.githubusercontent.com/Raynoks/optilux/main/latest.json"
+UPDATE_URL = "https://raw.githubusercontent.com/Raynoks/Optilux-Desktop/main/latest.json"
 
 ASSETS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
 ICON_ICO = os.path.join(ASSETS_DIR, "optilux.ico")
