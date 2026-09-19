@@ -6,11 +6,20 @@ import sqlite3
 import os
 import datetime
 from auth import hash_password
+import sys
 
-DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "optilux.db")
-ASSETS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
-PRODUCT_IMAGES_DIR = os.path.join(ASSETS_DIR, "products")
-FACTURE_FILES_DIR = os.path.join(ASSETS_DIR, "factures_stockees")
+if getattr(sys, "frozen", False):
+    APP_DIR = os.path.dirname(sys.executable)
+    ASSETS_DIR = os.path.join(sys._MEIPASS, "assets")
+    PRODUCT_IMAGES_DIR = os.path.join(APP_DIR, "assets", "products")
+    FACTURE_FILES_DIR = os.path.join(APP_DIR, "assets", "factures_stockees")
+else:
+    APP_DIR = os.path.dirname(os.path.abspath(__file__))
+    ASSETS_DIR = os.path.join(APP_DIR, "assets")
+    PRODUCT_IMAGES_DIR = os.path.join(ASSETS_DIR, "products")
+    FACTURE_FILES_DIR = os.path.join(ASSETS_DIR, "factures_stockees")
+
+DB_PATH = os.path.join(APP_DIR, "optilux.db")
 
 
 def get_connection():

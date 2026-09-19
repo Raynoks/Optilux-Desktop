@@ -24,7 +24,16 @@ from whatsapp import send_whatsapp, normalize_phone
 APP_VERSION = "1.0.3"           # bump this on every release
 UPDATE_URL = "https://raw.githubusercontent.com/Raynoks/Optilux-Desktop/main/latest.json"
 
-ASSETS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
+# Bundled assets live inside the PyInstaller extraction folder (read-only);
+# user data (generated invoices, template copies) lives next to the exe.
+if getattr(sys, "frozen", False):
+    BUNDLE_DIR = sys._MEIPASS
+    DATA_DIR = os.path.dirname(sys.executable)
+else:
+    BUNDLE_DIR = os.path.dirname(os.path.abspath(__file__))
+    DATA_DIR = BUNDLE_DIR
+
+ASSETS_DIR = os.path.join(BUNDLE_DIR, "assets")
 ICON_ICO = os.path.join(ASSETS_DIR, "optilux.ico")
 LOGO_PNG = os.path.join(ASSETS_DIR, "optilux_logo.png")
 
@@ -899,8 +908,8 @@ class OptiluxApp(tk.Tk):
         apply_theme(get_setting("theme", "light"))
 
         self.title("OPTILUX — Gestion (v1.0.3)")
-        self.geometry("1180x740")
-        self.minsize(1180, 740)
+        self.geometry("1200x800")
+        self.minsize(1200, 800)
         self._center_window()
         self.configure(bg=CONTENT_BG)
         setup_style(self)
@@ -948,7 +957,7 @@ class OptiluxApp(tk.Tk):
         w = self.winfo_width()
         h = self.winfo_height()
         if w <= 1 or h <= 1:
-            w, h = 1180, 740  # not yet realized — use the requested size
+            w, h = 1200, 800  # not yet realized — use the requested size
         sw = self.winfo_screenwidth()
         sh = self.winfo_screenheight()
         x = max(0, (sw - w) // 2)
@@ -1302,12 +1311,6 @@ class LoginFrame(tk.Frame):
 
         self.user_entry.focus_set()
 
-    def reset(self):
-        self.user_entry.delete(0, "end")
-        self.pass_entry.delete(0, "end")
-        self.error_lbl.pack_forget()
-        self.user_entry.focus_set()
-
     def refresh_theme(self):
         """Rebuild with current theme colors — called after a theme toggle so the login
         screen stays correct even if the user never sees it again until after logout."""
@@ -1317,6 +1320,7 @@ class LoginFrame(tk.Frame):
         self.user_entry.delete(0, "end")
         self.pass_entry.delete(0, "end")
         self.error_lbl.pack_forget()
+        self.user_entry.focus_set()
 
     def attempt_login(self):
         from auth import verify_password
@@ -3286,7 +3290,7 @@ def generate_facture_pdf(sale, client, rx):
     from reportlab.pdfgen import canvas
     from reportlab.lib.units import mm
 
-    out_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "factures")
+    out_dir = os.path.join(DATA_DIR, "factures")
     os.makedirs(out_dir, exist_ok=True)
     client_label = f"{client['nom']}_{client['prenom'] or ''}".strip("_") if client else "client"
     fname = f"Facture_{sale['id']}_{client_label.replace(' ', '_')}.pdf"
@@ -3501,7 +3505,7 @@ def _draw_invoice_docx(container, sale, client, rx):
     run2 = p2.add_run("RC: 148206 / PATENTE: 50405209 / IF: 24813627 / ICE: 001962144000020 / NUM : 06 49 24 94 24")
     run2.font.size = Pt(8)
 
-TEMPLATE_DOCX = os.path.join(os.path.dirname(os.path.abspath(__file__)), "modell2027.docx")
+TEMPLATE_DOCX = os.path.join(BUNDLE_DIR, "modell2027.docx")
 
 W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 
@@ -3567,7 +3571,7 @@ def generate_facture_docx(sale, client, rx):
             "Placez modell2027.docx à côté de app.py."
         )
 
-    out_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "factures")
+    out_dir = os.path.join(DATA_DIR, "factures")
     os.makedirs(out_dir, exist_ok=True)
     client_label = f"{client['nom']}_{client['prenom'] or ''}".strip("_") if client else "client"
     fname = f"Facture_{sale['id']}_{client_label.replace(' ', '_')}.docx"
