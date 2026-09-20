@@ -21,7 +21,7 @@ from notifications import notify
 from whatsapp import send_whatsapp, normalize_phone
 
 
-APP_VERSION = "1.0.3"           # bump this on every release
+APP_VERSION = "1.0.4"           # bump this on every release
 UPDATE_URL = "https://raw.githubusercontent.com/Raynoks/Optilux-Desktop/main/latest.json"
 
 # Bundled assets live inside the PyInstaller extraction folder (read-only);
@@ -907,7 +907,7 @@ class OptiluxApp(tk.Tk):
         super().__init__()
         apply_theme(get_setting("theme", "light"))
 
-        self.title("OPTILUX — Gestion (v1.0.3)")
+        self.title("OPTILUX — Gestion (v1.0.4)")
         self.geometry("1200x800")
         self.minsize(1200, 800)
         self._center_window()
@@ -1297,11 +1297,6 @@ class LoginFrame(tk.Frame):
 
         btn = primary_button(card, "Se connecter", self.attempt_login, icon="lock")
         btn.pack(fill="x", pady=(18, 6), ipady=4)
-
-        tk.Label(card, text="Démo — Admin : admin / admin123", font=FONT_MONO_SM,
-                  fg=SLATE, bg=SURFACE, justify="center").pack(pady=(14, 0))
-        tk.Label(card, text="Employé : employe1 / employe123", font=FONT_MONO_SM,
-                  fg=SLATE, bg=SURFACE, justify="center").pack()
 
         self.user_entry.bind("<Return>", lambda e: self.attempt_login())
         self.pass_entry.bind("<Return>", lambda e: self.attempt_login())
@@ -1898,26 +1893,31 @@ class DashboardPage(BasePage):
 
         # ---- cartes du bas : 2 par rangée (plus de place pour le texte agrandi) ----
         card_specs = []
+        # Financial cards — admin only
         if self.app.is_admin():
             card_specs.append(("Disponible net", "growth", lambda card: self._build_dispo(card, dispo)))
             card_specs.append(("Chiffre d'affaires", "sales", lambda card: self._build_ca(card, ca)))
-            card_specs.append(("Rendez-vous aujourd'hui", "calendar", lambda card: self._build_list(
+
+        # Operational cards — visible to everyone (employee + admin)
+        card_specs.append(("Rendez-vous aujourd'hui", "calendar", lambda card: self._build_list(
             card, today_appts, "Aucun rendez-vous aujourd'hui.",
-                lambda a: (f"{a['heure']} — {a['client_nom']}", a["statut"], SLATE))))
-            card_specs.append(("Alertes stock", "warning", lambda card: self._build_list(
+            lambda a: (f"{a['heure']} — {a['client_nom']}", a["statut"], SLATE))))
+        card_specs.append(("Alertes stock", "warning", lambda card: self._build_list(
             card, low_stock, "Tout le stock est suffisant.",
-                lambda s: (s["nom"], f"{s['qte']} restant(s)", RED))))
-            card_specs.append(("Commandes à suivre", "package", lambda card: self._build_list(
+            lambda s: (s["nom"], f"{s['qte']} restant(s)", RED))))
+        card_specs.append(("Commandes à suivre", "package", lambda card: self._build_list(
             card, commande_alerts[:6], "Aucune commande urgente.",
-                 lambda c: (
-                    ((c["fournisseur"] if (c["type"] or "client") == "fournisseur"
-                        else f"{c['client_nom'] or ''} {c['client_prenom'] or ''}".strip()) or "—")
-                        + (f" — {c['description']}" if c["description"] else ""),
-                    "EN RETARD" if CommandesPage.alert_state(c) == "overdue" else "BIENTÔT", RED))))
-            card_specs.append(("Dépenses à payer", "wallet", lambda card: self._build_list(
-            card, expense_alerts[:6], "Aucune échéance proche.",
-            lambda pair: self._expense_alert_row(pair))))
+            lambda c: (
+                ((c["fournisseur"] if (c["type"] or "client") == "fournisseur"
+                    else f"{c['client_nom'] or ''} {c['client_prenom'] or ''}".strip()) or "—")
+                    + (f" — {c['description']}" if c["description"] else ""),
+                "EN RETARD" if CommandesPage.alert_state(c) == "overdue" else "BIENTÔT", RED))))
+
+        # Admin-only cards that come after the operational ones
         if self.app.is_admin():
+            card_specs.append(("Dépenses à payer", "wallet", lambda card: self._build_list(
+                card, expense_alerts[:6], "Aucune échéance proche.",
+                lambda pair: self._expense_alert_row(pair))))
             card_specs.append(("Factures récentes", "document", lambda card: self._build_list(
                 card, recent_factures, "Aucune facture enregistrée.",
                 lambda f: (f["titre"] or "—", money(f["montant"]), SLATE))))

@@ -1,19 +1,43 @@
+# ==== Data — NEVER commit ====
 optilux.db
 optilux.db-journal
 optilux.db-wal
 factures/
 assets/products/
 assets/factures_stockees/
+
+# ==== Python ====
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
 .venv/
+venv/
+
+# ==== PyInstaller build output ====
+build/
+dist/
+
+# ==== Inno Setup output ====
+installer/
+
+# ==== Release zips ====
+*.zip
+*.rar
+
+# ==== Dev-only scripts ====
 check_fields.py
 test_toast.py
 PyWhatKit_DB.txt
-*.zip
-optilux_clean/
-build_release.ps1
-build_release.bat
-exclude.txt
+
+# ==== OS junk ====
 .DS_Store
 Thumbs.db
+desktop.ini
+*.lnk
+
+# ==== Editor ====
+.vscode/
+.idea/
+*.swp
+*~

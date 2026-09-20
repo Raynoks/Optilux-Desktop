@@ -4,9 +4,9 @@ Utilise SQLite (fichier local optilux.db) - aucune connexion internet requise.
 """
 import sqlite3
 import os
+import sys
 import datetime
 from auth import hash_password
-import sys
 
 if getattr(sys, "frozen", False):
     APP_DIR = os.path.dirname(sys.executable)
