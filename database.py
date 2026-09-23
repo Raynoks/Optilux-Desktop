@@ -198,6 +198,8 @@ MIGRATIONS = [
     "ALTER TABLE commandes ADD COLUMN type TEXT DEFAULT 'client'",
     "ALTER TABLE commandes ADD COLUMN fournisseur TEXT",
 
+    "ALTER TABLE prescriptions ADD COLUMN lentille_texte TEXT",
+    "ALTER TABLE prescriptions ADD COLUMN lentille_check INTEGER DEFAULT 0",
 ]
 
 DEFAULT_TYPES = {

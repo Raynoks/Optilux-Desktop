@@ -109,3 +109,33 @@ def _is_updatable(rel_path):
     """Only .py, .docx, .ico, .png, .txt, .json, .md files are copied."""
     ext = os.path.splitext(rel_path)[1].lower()
     return ext in (".py", ".docx", ".ico", ".png", ".txt", ".json", ".md")
+
+def download_and_run_installer(info, timeout=120):
+    """Download the installer .exe and run it silently. The installer will
+    close our running process, replace the app files, and relaunch."""
+    import subprocess
+
+    tmp_dir = tempfile.mkdtemp(prefix="optilux_update_")
+    exe_name = os.path.basename(info["url"]) or "Optilux-Setup.exe"
+    exe_path = os.path.join(tmp_dir, exe_name)
+
+    req = urllib.request.Request(info["url"], headers={"User-Agent": "Optilux-Updater/1.0"})
+    with urllib.request.urlopen(req, timeout=timeout) as resp, open(exe_path, "wb") as f:
+        shutil.copyfileobj(resp, f)
+
+    # Launch silently. Inno Setup flags:
+    #   /SILENT               no wizard, just progress bar
+    #   /SUPPRESSMSGBOXES     don't ask questions
+    #   /NORESTART            don't reboot Windows
+    #   /CLOSEAPPLICATIONS    close running Optilux before replacing files
+    #   /RESTARTAPPLICATIONS  relaunch Optilux after install
+    #   /NOCANCEL             disable the Cancel button during install
+    subprocess.Popen([
+        exe_path,
+        "/SILENT",
+        "/SUPPRESSMSGBOXES",
+        "/NORESTART",
+        "/CLOSEAPPLICATIONS",
+        "/RESTARTAPPLICATIONS",
+        "/NOCANCEL",
+    ])

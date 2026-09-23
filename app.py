@@ -21,7 +21,7 @@ from notifications import notify
 from whatsapp import send_whatsapp, normalize_phone
 
 
-APP_VERSION = "1.0.4"           # bump this on every release
+APP_VERSION = "1.0.0"           # bump this on every release
 UPDATE_URL = "https://raw.githubusercontent.com/Raynoks/Optilux-Desktop/main/latest.json"
 
 # Bundled assets live inside the PyInstaller extraction folder (read-only);
@@ -907,7 +907,7 @@ class OptiluxApp(tk.Tk):
         super().__init__()
         apply_theme(get_setting("theme", "light"))
 
-        self.title("OPTILUX — Gestion (v1.0.4)")
+        self.title("OPTILUX — Gestion (v1.0.0)")
         self.geometry("1200x800")
         self.minsize(1200, 800)
         self._center_window()
@@ -1034,6 +1034,7 @@ class OptiluxApp(tk.Tk):
         except Exception as e:
             print("Erreur vérification notifications:", e)
         self._notify_job = self.after(self.NOTIFY_INTERVAL_MS, self._run_notification_checks)
+
     def _silent_update_check(self):
         """Check for updates in the background 3 s after login. Silent unless
         a newer version exists — then asks the user if they want to install."""
@@ -1053,18 +1054,25 @@ class OptiluxApp(tk.Tk):
             return
 
         try:
-            app_dir = os.path.dirname(os.path.abspath(__file__))
-            from updater import download_and_apply
-            n = download_and_apply(info, app_dir)
+            if getattr(sys, "frozen", False):
+                # Packaged .exe → download and silently run the new installer
+                from updater import download_and_run_installer
+                download_and_run_installer(info)
+                # Give the installer a moment to spawn, then exit cleanly.
+                self.after(1500, self.destroy)
+            else:
+                # Running from source → replace .py files with the ZIP contents
+                app_dir = os.path.dirname(os.path.abspath(__file__))
+                from updater import download_and_apply
+                n = download_and_apply(info, app_dir)
+                messagebox.showinfo(
+                    "Mise à jour installée",
+                    f"{n} fichier(s) mis à jour vers la version {info['version']}.\n\n"
+                    "L'application va se fermer. Rouvrez-la pour utiliser la nouvelle version.")
+                self.destroy()
         except Exception as e:
             messagebox.showerror("Erreur de mise à jour", f"Échec du téléchargement :\n{e}")
             return
-
-        messagebox.showinfo(
-            "Mise à jour installée",
-            f"{n} fichier(s) mis à jour vers la version {info['version']}.\n\n"
-            "L'application va se fermer. Rouvrez-la pour utiliser la nouvelle version.")
-        self.destroy()
 
     @staticmethod
     def find_client_phone(client_nom):
@@ -1534,8 +1542,7 @@ class MainFrame(tk.Frame):
         widget.bind("<Leave>", on_leave)
 
     def check_updates(self):
-        from updater import check_for_update, download_and_apply
-
+        from updater import check_for_update
         try:
             info = check_for_update(UPDATE_URL, APP_VERSION)
         except Exception as e:
@@ -1557,17 +1564,22 @@ class MainFrame(tk.Frame):
             return
 
         try:
-            app_dir = os.path.dirname(os.path.abspath(__file__))
-            n = download_and_apply(info, app_dir)
+            if getattr(sys, "frozen", False):
+                from updater import download_and_run_installer
+                download_and_run_installer(info)
+                self.after(1500, self.app.destroy)
+            else:
+                app_dir = os.path.dirname(os.path.abspath(__file__))
+                from updater import download_and_apply
+                n = download_and_apply(info, app_dir)
+                messagebox.showinfo(
+                    "Mise à jour installée",
+                    f"{n} fichier(s) mis à jour vers la version {info['version']}.\n\n"
+                    "L'application va se fermer. Rouvrez-la pour utiliser la nouvelle version.")
+                self.app.destroy()
         except Exception as e:
             messagebox.showerror("Erreur de mise à jour", f"Échec du téléchargement :\n{e}")
             return
-
-        messagebox.showinfo(
-            "Mise à jour installée",
-            f"{n} fichier(s) mis à jour vers la version {info['version']}.\n\n"
-            "L'application va se fermer. Rouvrez-la pour utiliser la nouvelle version.")
-        self.app.destroy()
 
 
 # ================================================================== PAGE BASE
@@ -2203,10 +2215,13 @@ class ClientsPage(BasePage):
                         tk.Label(table, text=rxg(f"{eye}_{field_key}"), font=FONT_MONO_SM, fg=TEXT,
                                   bg=SURFACE).grid(row=r, column=i, padx=4, pady=2)
 
-                self.section_label(body, "Verres / Firme / Monture")
+                self.section_label(body, "Verres / Firme / Monture / Lentille")
                 self.info_row(body, "Verres", rxg("verres_texte"))
                 self.info_row(body, "Firme", rxg("firme_texte"))
                 self.info_row(body, "Monture", rxg("monture_texte"))
+                self.info_row(body, "Lentille", rxg("lentille_texte"))
+
+
 
                 self.section_label(body, "Prix")
                 self.info_row(body, "Prix / Avance", f"{rxg('prix')} / {rxg('avance')}")
@@ -2322,6 +2337,7 @@ class ClientsPage(BasePage):
             info(card, "Verres", v_txt)
             info(card, "Firme", f_txt)
             info(card, "Monture", m_txt)
+            info(card, "Lentille", g(rx, "lentille_texte"))
 
             section(card, "Prix")
             info(card, "Prix / Avance", f"{g(rx, 'prix')} / {g(rx, 'avance')}")
@@ -2455,6 +2471,7 @@ class ClientsPage(BasePage):
         verres_e, verres_c = text_with_check("Verres", rxg("verres_texte"), rxg("verres_check", 0))
         firme_e, firme_c = text_with_check("Firme", rxg("firme_texte"), rxg("firme_check", 0))
         monture_e, monture_c = text_with_check("Monture", rxg("monture_texte"), rxg("monture_check", 0))
+        lentille_e, lentille_c = text_with_check("Lentilles", rxg("lentille_texte"), rxg("lentille_check", 0))
 
         row_prix = tk.Frame(body, bg=SURFACE); row_prix.pack(fill="x")
         row_prix.grid_columnconfigure(0, weight=1); row_prix.grid_columnconfigure(1, weight=1)
@@ -2500,8 +2517,9 @@ class ClientsPage(BasePage):
                 od_sph, od_cyl, od_axe, od_add, od_ep, od_ht,
                 og_sph, og_cyl, og_axe, og_add, og_ep, og_ht,
                 verres_texte, verres_check, firme_texte, firme_check, monture_texte, monture_check,
-                prix, avance, jour_livraison, r_texte
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
+                prix, avance, jour_livraison, r_texte,
+                lentille_texte, lentille_check
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
                 cid, today_iso(), int(vl_var.get()), int(vp_var.get()), int(pg_var.get()),
                 arx_od_e.get(), arx_og_e.get(), av_od_e.get(), av_og_e.get(), av_odg_e.get(),
                 prescripteur_e.get(), presc_date_e.get(),
@@ -2513,6 +2531,7 @@ class ClientsPage(BasePage):
                 verres_e.get(), int(verres_c.get()), firme_e.get(), int(firme_c.get()),
                 monture_e.get(), int(monture_c.get()),
                 prix_e.get(), avance_e.get(), jour_var.get(), r_e.get(),
+                lentille_e.get(), int(lentille_c.get()),
             ))
             conn.commit()
             conn.close()

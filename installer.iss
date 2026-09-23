@@ -1,7 +1,7 @@
 ; installer.iss — Optilux Desktop installer
 
 #define MyAppName "Optilux"
-#define MyAppVersion "1.0.4"
+#define MyAppVersion "1.0.0"
 #define MyAppPublisher "Optilux"
 #define MyAppExeName "Optilux.exe"
 
@@ -23,6 +23,8 @@ SetupIconFile=assets\optilux.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
+CloseApplications=yes
+RestartApplications=yes
 
 [Languages]
 Name: "french"; MessagesFile: "compiler:Languages\French.isl"
