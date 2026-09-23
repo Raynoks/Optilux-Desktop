@@ -21,7 +21,7 @@ from notifications import notify
 from whatsapp import send_whatsapp, normalize_phone
 
 
-APP_VERSION = "1.0.0"           # bump this on every release
+APP_VERSION = "1.0.1"           # bump this on every release
 UPDATE_URL = "https://raw.githubusercontent.com/Raynoks/Optilux-Desktop/main/latest.json"
 
 # Bundled assets live inside the PyInstaller extraction folder (read-only);
@@ -907,7 +907,7 @@ class OptiluxApp(tk.Tk):
         super().__init__()
         apply_theme(get_setting("theme", "light"))
 
-        self.title("OPTILUX — Gestion (v1.0.0)")
+        self.title("OPTILUX — Gestion (v1.0.1)")
         self.geometry("1200x800")
         self.minsize(1200, 800)
         self._center_window()
