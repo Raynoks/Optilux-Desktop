@@ -1,7 +1,7 @@
 ; installer.iss — Optilux Desktop installer
 
 #define MyAppName "Optilux"
-#define MyAppVersion "1.0.1"
+#define MyAppVersion "1.0.2"
 #define MyAppPublisher "Optilux"
 #define MyAppExeName "Optilux.exe"
 
@@ -34,7 +34,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "Créer un raccourci sur le Bureau"; GroupDescription: "Raccourcis :"; Flags: checkedonce
 
 [Files]
-Source: "dist\Optilux\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "dist\Optilux\*"; DestDir: "{app}"; Excludes: "optilux.db,optilux.db-journal,optilux.db-wal,factures,assets\products,assets\factures_stockees,backups,last_launch.txt"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"

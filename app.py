@@ -21,7 +21,7 @@ from notifications import notify
 from whatsapp import send_whatsapp, normalize_phone
 
 
-APP_VERSION = "1.0.1"           # bump this on every release
+APP_VERSION = "1.0.2"           # bump this on every release
 UPDATE_URL = "https://raw.githubusercontent.com/Raynoks/Optilux-Desktop/main/latest.json"
 
 # Bundled assets live inside the PyInstaller extraction folder (read-only);
@@ -905,9 +905,32 @@ class OptiluxApp(tk.Tk):
                 pass
 
         super().__init__()
+
+        try:
+            import datetime as _dt
+            _db = DB_PATH
+            if os.path.exists(_db):
+                _backup_dir = os.path.join(DATA_DIR, "backups")
+                os.makedirs(_backup_dir, exist_ok=True)
+                _today = _dt.date.today().isoformat()
+                _backup_path = os.path.join(_backup_dir, f"optilux-{_today}.db")
+                if not os.path.exists(_backup_path):
+                    shutil.copy2(_db, _backup_path)
+                _files = sorted(
+                    f for f in os.listdir(_backup_dir)
+                    if f.startswith("optilux-") and f.endswith(".db")
+                )
+                for _old in _files[:-30]:
+                    try:
+                        os.remove(os.path.join(_backup_dir, _old))
+                    except Exception:
+                        pass
+        except Exception as _e:
+            print(f"[backup] échec : {_e}")
+            
         apply_theme(get_setting("theme", "light"))
 
-        self.title("OPTILUX — Gestion (v1.0.1)")
+        self.title("OPTILUX — Gestion (v1.0.2)")
         self.geometry("1200x800")
         self.minsize(1200, 800)
         self._center_window()
