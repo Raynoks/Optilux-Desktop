@@ -21,7 +21,7 @@ from notifications import notify
 from whatsapp import send_whatsapp, normalize_phone
 
 
-APP_VERSION = "1.0.0"           # bump this on every release
+APP_VERSION = "1.0.1"           # bump this on every release
 UPDATE_URL = "https://raw.githubusercontent.com/Raynoks/Optilux-Desktop/main/latest.json"
 
 # Bundled assets live inside the PyInstaller extraction folder (read-only);
@@ -151,7 +151,7 @@ FONT_MONO = ("Consolas", 11,)
 FONT_MONO_SM = ("Consolas", 11)
 # Dashboard-specific fonts — easier to read than the small mono font used elsewhere.
 FONT_DASH_LABEL = ("Segoe UI", 11, "normal")
-FONT_DASH_TEXT  = ("Segoe UI", 12, "bold")
+FONT_DASH_TEXT  = ("Segoe UI", 12, "normal")
 FONT_DASH_VALUE = ("Georgia", 22, "bold")
 
 def CATEGORIES_STOCK(): return get_types("stock_categorie")
@@ -161,11 +161,11 @@ def TYPES_LENTILLE(): return get_types("lentille_type")
 def DUREES_LENTILLE(): return get_types("lentille_duree")
 
 
-SERVICES_RDV = ["Consultation de contrôle", "Essayage monture", "Adaptation lentilles", "Réparation", "Autre"]
+SERVICES_RDV = ["Consultation", "Récupération de lunettes", "Récupération de lentilles", "Échéance crédit client", "Adaptation lentilles", "Réparation", "Autre"]
 STATUTS_RDV = ["Prévu", "Confirmé", "Terminé", "Annulé"]
 MODES_PAIEMENT = ["Espèces", "TPE"]
 STATUTS_COMMANDE = ["En attente", "Prête", "Livrée", "Annulée"]
-JOURS_SEMAINE = ["L", "ME", "MA", "J", "V", "S"]
+JOURS_SEMAINE = ["L", "MA", "ME", "J", "V", "S"]
 TYPE_CATEGORIES = [
     ("stock_categorie", "Catégories d'articles (Stock)"),
     ("stock_marque", "Marques (Stock)"),
@@ -592,6 +592,19 @@ def _ic_clock(d, s, c, lw):
     d.line([(cx, cy), (cx, cy - r * 0.55)], fill=c, width=max(1, lw - 1))
     d.line([(cx, cy), (cx + r * 0.42, cy + r * 0.14)], fill=c, width=max(1, lw - 1))
 
+def _ic_eye(d, s, c, lw):
+    cx, cy = s * 0.5, s * 0.5
+    w = s * 0.40
+    h = s * 0.22
+    d.arc([cx - w, cy - h, cx + w, cy + h], start=180, end=360, fill=c, width=lw)
+    d.arc([cx - w, cy - h, cx + w, cy + h], start=0, end=180, fill=c, width=lw)
+    r = s * 0.10
+    d.ellipse([cx - r, cy - r, cx + r, cy + r], fill=c)
+
+
+def _ic_eye_off(d, s, c, lw):
+    _ic_eye(d, s, c, lw)
+    d.line([(s * 0.20, s * 0.82), (s * 0.80, s * 0.18)], fill=c, width=lw)
 
 def _ic_growth(d, s, c, lw):
     d.line([(s * 0.16, s * 0.82), (s * 0.84, s * 0.82)], fill=c, width=lw)
@@ -671,6 +684,7 @@ _ICON_DRAWERS = {
     "clock": _ic_clock, "growth": _ic_growth, "lock": _ic_lock,
     "sun": _ic_sun, "moon": _ic_moon, "bell": _ic_bell,
     "package": _ic_package, "gear": _ic_gear,
+    "eye": _ic_eye, "eye_off": _ic_eye_off,
 }
 
 
@@ -759,6 +773,106 @@ def field(parent, label_text, initial="", show=None, width=None):
     entry.insert(0, "" if initial is None else str(initial))
     entry.pack(fill="x", ipady=4)
     return entry
+
+
+def password_field(parent, label_text, initial=""):
+    """Password entry with a small eye button that toggles visibility."""
+    tk.Label(parent, text=label_text.upper(), font=FONT_MONO_SM, fg=SLATE, bg=SURFACE,
+              anchor="w").pack(fill="x", pady=(8, 2))
+    row = tk.Frame(parent, bg=SURFACE, highlightbackground=BORDER, highlightcolor=RED,
+                   highlightthickness=1)
+    row.pack(fill="x")
+    entry = tk.Entry(row, font=FONT_BODY, relief="flat", show="•",
+                     bg=SURFACE, fg=TEXT, insertbackground=TEXT, borderwidth=0)
+    entry.insert(0, initial or "")
+    entry.pack(side="left", fill="x", expand=True, ipady=4, padx=(6, 0))
+
+    state = {"visible": False}
+    btn = tk.Label(row, bg=SURFACE, cursor="hand2", padx=6)
+
+    def refresh_icon():
+        icon = get_icon("eye_off" if state["visible"] else "eye", SLATE, 16)
+        if icon:
+            btn.configure(image=icon)
+            btn._icon_ref = icon
+
+    def toggle(_e=None):
+        state["visible"] = not state["visible"]
+        entry.configure(show="" if state["visible"] else "•")
+        refresh_icon()
+
+    btn.bind("<Button-1>", toggle)
+    refresh_icon()
+    btn.pack(side="right" , padx=(0, 10))
+    return entry
+
+
+class HourField(tk.Frame):
+    """Two spinboxes (HH : MM). Behaves like an Entry: .get() returns 'HH:MM',
+    or '' if incomplete."""
+    def __init__(self, parent, initial=""):
+        super().__init__(parent, bg=SURFACE, highlightbackground=BORDER, highlightcolor=RED,
+                         highlightthickness=1)
+        h = m = None
+        if initial:
+            try:
+                parts = str(initial).strip().split(":")
+                h = int(parts[0])
+                m = int(parts[1]) if len(parts) > 1 else 0
+            except (ValueError, TypeError, IndexError):
+                pass
+        self.hour_var = tk.StringVar(value=f"{h:02d}" if h is not None else "")
+        self.min_var = tk.StringVar(value=f"{m:02d}" if m is not None else "")
+
+        def make_spin(var, from_, to, width):
+            return tk.Spinbox(self, from_=from_, to=to, width=width, font=FONT_MONO_SM,
+                              bg=SURFACE, fg=TEXT, buttonbackground=CONTENT_BG,
+                              relief="flat", justify="center", textvariable=var,
+                              highlightthickness=0, borderwidth=0, wrap=True,
+                              format="%02.0f")
+
+        make_spin(self.hour_var, 0, 23, 3).pack(side="left", padx=(8, 2), pady=5)
+        tk.Label(self, text=":", font=FONT_MONO_SM, bg=SURFACE, fg=SLATE).pack(side="left")
+        make_spin(self.min_var, 0, 59, 3).pack(side="left", padx=(2, 8))
+
+        clear = tk.Label(self, text="×", font=FONT_BODY_B, bg=SURFACE, fg=SLATE, cursor="hand2")
+        clear.pack(side="right", padx=(0, 8))
+        clear.bind("<Button-1>", lambda e: self.clear())
+
+    def clear(self):
+        self.hour_var.set("")
+        self.min_var.set("")
+
+    def get(self):
+        h = self.hour_var.get().strip()
+        m = self.min_var.get().strip()
+        if not (h and m):
+            return ""
+        try:
+            return f"{int(h):02d}:{int(m):02d}"
+        except (ValueError, tk.TclError):
+            return ""
+
+    def set(self, value):
+        try:
+            parts = str(value).strip().split(":")
+            h = int(parts[0])
+            m = int(parts[1]) if len(parts) > 1 else 0
+            if not (0 <= h <= 23 and 0 <= m <= 59):
+                raise ValueError
+            self.hour_var.set(f"{h:02d}")
+            self.min_var.set(f"{m:02d}")
+        except (ValueError, TypeError, IndexError):
+            self.clear()
+
+    
+def field_hour(parent, label_text, initial=""):
+    """Same shape as field(), but renders an HourField."""
+    tk.Label(parent, text=label_text.upper(), font=FONT_MONO_SM, fg=SLATE, bg=SURFACE,
+              anchor="w").pack(fill="x", pady=(8, 2))
+    hf = HourField(parent, initial=initial)
+    hf.pack(fill="x")
+    return hf
 
 class DateField(tk.Frame):
     """Three spinboxes (J / M / A). Behaves like an Entry: .get() returns
@@ -930,10 +1044,10 @@ class OptiluxApp(tk.Tk):
 
         apply_theme(get_setting("theme", "light"))
 
-        self.title("OPTILUX — Gestion (v1.0.0)")
+        self.title("OPTILUX — Gestion (v1.0.1)")
         self.geometry("1200x800")
         self.minsize(1200, 800)
-        self._center_window()
+        self.state("zoomed")
         self.configure(bg=CONTENT_BG)
         setup_style(self)
         self._set_window_icon()
@@ -1082,7 +1196,7 @@ class OptiluxApp(tk.Tk):
                 from updater import download_and_run_installer
                 download_and_run_installer(info)
                 # Give the installer a moment to spawn, then exit cleanly.
-                self.after(1500, self.destroy)
+                self.after(4000, self._hard_exit)
             else:
                 # Running from source → replace .py files with the ZIP contents
                 app_dir = os.path.dirname(os.path.abspath(__file__))
@@ -1096,6 +1210,16 @@ class OptiluxApp(tk.Tk):
         except Exception as e:
             messagebox.showerror("Erreur de mise à jour", f"Échec du téléchargement :\n{e}")
             return
+
+    def _hard_exit(self):
+        """Close the app without cleanup. Critical for updates: os._exit(0) kills
+        the process immediately so Windows releases the file lock on Optilux.exe
+        before the installer tries to replace it."""
+        try:
+            self.destroy()
+        except Exception:
+            pass
+        os._exit(0)
 
     @staticmethod
     def find_client_phone(client_nom):
@@ -1306,6 +1430,36 @@ class LoginFrame(tk.Frame):
         for w in self.winfo_children():
             w.destroy()
 
+                    # ---- Snellen-chart letters as a subtle background ----
+        bg_canvas = tk.Canvas(self, bg=INK, highlightthickness=0)
+        bg_canvas.place(relx=0, rely=0, relwidth=1, relheight=1)
+
+        def draw_letters(_e=None):
+            bg_canvas.delete("all")
+            w = bg_canvas.winfo_width()
+            h = bg_canvas.winfo_height()
+            if w < 50 or h < 50:
+                return
+            cx = w // 2
+            fill = "#1c1c1e"   # just barely lighter than INK
+            # Top of the chart
+            bg_canvas.create_text(cx, h * 0.10, text="E",
+                                  font=("Consolas", 100, "bold"), fill=fill)
+            bg_canvas.create_text(cx, h * 0.24, text="F              P",
+                                  font=("Consolas", 50, "bold"), fill=fill)
+            bg_canvas.create_text(cx, h * 0.36, text="T        O        Z",
+                                  font=("Consolas", 32, "bold"), fill=fill)
+            # Bottom of the chart
+            bg_canvas.create_text(cx, h * 0.66, text="L        P        E        D",
+                                  font=("Consolas", 22, "bold"), fill=fill)
+            bg_canvas.create_text(cx, h * 0.78, text="P    E    C    F    D",
+                                  font=("Consolas", 16, "bold"), fill=fill)
+            bg_canvas.create_text(cx, h * 0.87, text="E   D   F   C   Z   P",
+                                  font=("Consolas", 12, "bold"), fill=fill)
+
+        bg_canvas.bind("<Configure>", draw_letters)
+        bg_canvas.after(80, draw_letters)
+
         card = tk.Frame(self, bg=SURFACE, padx=40, pady=40, highlightbackground=BORDER, highlightthickness=1)
         card.place(relx=0.5, rely=0.5, anchor="center", width=400)
 
@@ -1321,7 +1475,7 @@ class LoginFrame(tk.Frame):
         tk.Label(card, text="GESTION INTERNE", font=FONT_MONO_SM, bg=SURFACE, fg=SLATE).pack(pady=(0, 20))
 
         self.user_entry = field(card, "Identifiant")
-        self.pass_entry = field(card, "Mot de passe", show="•")
+        self.pass_entry = password_field(card, "Mot de passe")
 
         self.error_lbl = tk.Label(card, text="Identifiant ou mot de passe incorrect.",
                                     font=FONT_MONO_SM, fg=RED, bg=SURFACE)
@@ -1590,7 +1744,7 @@ class MainFrame(tk.Frame):
             if getattr(sys, "frozen", False):
                 from updater import download_and_run_installer
                 download_and_run_installer(info)
-                self.after(1500, self.app.destroy)
+                self.after(4000, self.app._hard_exit)
             else:
                 app_dir = os.path.dirname(os.path.abspath(__file__))
                 from updater import download_and_apply
@@ -1713,7 +1867,7 @@ class BasePage(tk.Frame):
         tree = ttk.Treeview(wrap, columns=columns, show="headings", height=height)
         for c in columns:
             tree.heading(c, text=c.upper())
-            tree.column(c, width=120, anchor="w")
+            tree.column(c, width=120, anchor="center")
         vsb = ttk.Scrollbar(wrap, orient="vertical", command=tree.yview, style="Custom.Vertical.TScrollbar")
         tree.configure(yscroll=vsb.set)
         tree.pack(side="left", fill="both", expand=True)
@@ -1743,7 +1897,14 @@ class ModalForm(tk.Toplevel):
         except Exception:
             pass
 
-        # scrollable area (fields) — a Canvas + inner Frame, with a fixed footer below for Save/Cancel
+        # ---- Footer FIRST: reserves space at the bottom of the modal. ----
+        # If packed after the canvas (which has expand=True), Tk gives the
+        # canvas the whole window and the footer is never visible.
+        self.footer = tk.Frame(self, bg=SURFACE, padx=24, pady=16,
+                               highlightbackground=BORDER, highlightthickness=1)
+        self.footer.pack(fill="x", side="bottom")
+
+        # ---- Scrollable content area fills whatever's left ----
         canvas_wrap = tk.Frame(self, bg=SURFACE)
         canvas_wrap.pack(fill="both", expand=True)
         self._canvas = tk.Canvas(canvas_wrap, bg=SURFACE, highlightthickness=0)
@@ -1767,15 +1928,12 @@ class ModalForm(tk.Toplevel):
         def _on_wheel(e):
             delta = -1 if (e.num == 4 or e.delta > 0) else 1
             self._canvas.yview_scroll(delta, "units")
-        # bind wheel only while the pointer is over this modal's canvas, so it doesn't
-        # hijack scrolling in the main window behind it
+
         self._canvas.bind("<Enter>", lambda e: self._bind_wheel())
         self._canvas.bind("<Leave>", lambda e: self._unbind_wheel())
 
-        tk.Label(self.body, text=title, font=FONT_DISPLAY_SM, bg=SURFACE, fg=TEXT).pack(anchor="w", pady=(0, 10))
-
-        self.footer = tk.Frame(self, bg=SURFACE, padx=24, pady=16, highlightbackground=BORDER, highlightthickness=1)
-        self.footer.pack(fill="x", side="bottom")
+        tk.Label(self.body, text=title, font=FONT_DISPLAY_SM, bg=SURFACE, fg=TEXT).pack(
+            anchor="w", pady=(0, 10))
 
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self.center()
@@ -2129,13 +2287,16 @@ class ClientsPage(BasePage):
         super().__init__(parent, app)
         self.header("Fiches", "Clients", "+ Nouveau client", self.open_form)
         self.search_var = self.make_search_box("Rechercher un client…")
+
+        btns = tk.Frame(self, bg=CONTENT_BG)
+        btns.pack(fill="x", pady=(8, 12))
+        outline_button(btns, "Voir la fiche", lambda: self.open_detail(self._selected_id()), icon="search").pack(side="left")
+        danger_button(btns, "Supprimer", self.delete_selected).pack(side="left", padx=(8, 12))
+
         self.tree = self.make_table(["Nom", "Prénom", "Téléphone", "Ville", "Remise", "Dernière Rx"])
         self.tree.bind("<Double-1>", lambda e: self.open_detail(self._selected_id()))
 
-        btns = tk.Frame(self, bg=CONTENT_BG)
-        btns.pack(fill="x", pady=(8, 0))
-        outline_button(btns, "Voir la fiche", lambda: self.open_detail(self._selected_id()), icon="search").pack(side="left")
-        danger_button(btns, "Supprimer", self.delete_selected).pack(side="left", padx=(0, 12))
+        
 
     def _selected_id(self):
         sel = self.tree.selection()
@@ -2156,7 +2317,7 @@ class ClientsPage(BasePage):
             self.tree.insert("", "end", iid=str(c["id"]), tags=("even" if n % 2 == 0 else "odd",),
                               values=(c["nom"], c["prenom"] or "—", c["tel"] or "—", c["ville"] or "—",
                                       f"{c['remise']}%" if c["remise"] else "—",
-                                      rx["date"] if rx else "—"))
+                                      (rx["date_prescription"] or rx["date"]) if rx else "—"))
             n += 1
         conn.close()
 
@@ -2304,16 +2465,45 @@ class ClientsPage(BasePage):
         def section(parent, text):
             tk.Label(parent, text=text, font=FONT_MONO_SM, fg=RED, bg=SURFACE).pack(anchor="w", pady=(8, 2))
 
+        def delete_fiche(rx_id, date_str):
+            if not messagebox.askyesno(
+                "Confirmer",
+                f"Supprimer définitivement la fiche du {date_str or '—'} ?\n\n"
+                "Cette action est irréversible."
+            ):
+                return
+            conn = get_connection()
+            try:
+                conn.execute("DELETE FROM prescriptions WHERE id=?", (rx_id,))
+                conn.commit()
+            finally:
+                conn.close()
+            log_action(self.app.current_user["username"],
+                       f"Fiche supprimée (client_id={client_id}, date={date_str})")
+            modal.destroy()
+            self.open_history(client_id)            
+
         for rx in rxs:
             card = tk.Frame(modal.body, bg=SURFACE, highlightbackground=BORDER,
                              highlightthickness=1, padx=16, pady=14)
             card.pack(fill="x", pady=(0, 14))
 
             # En-tête : date + badges E.F.H
+            # En-tête : date | badges E.F.H | bouton supprimer
             head = tk.Frame(card, bg=SURFACE)
             head.pack(fill="x", pady=(0, 4))
             tk.Label(head, text=rx["date"] or "—", font=FONT_DISPLAY_SM,
                      bg=SURFACE, fg=TEXT).pack(side="left")
+
+            # Rightmost element — the delete button (packed first with side="right")
+            del_btn = tk.Button(
+                head, text="Supprimer",
+                command=lambda _rid=rx["id"], _d=rx["date"]: delete_fiche(_rid, _d),
+                font=FONT_MONO_SM, bg=SURFACE, fg=RED, bd=0, cursor="hand2",
+                padx=6, pady=2, activebackground=SURFACE, activeforeground=RED_BRIGHT,
+            )
+            del_btn.pack(side="right", padx=(8, 0))
+
             efh = " · ".join(lbl for lbl, on in (("VL", rx["vl"]), ("VP", rx["vp"]), ("PG", rx["pg"])) if on)
             if efh:
                 tk.Label(head, text=efh, font=FONT_MONO_SM, bg=SURFACE, fg=RED).pack(side="right")
@@ -2501,6 +2691,9 @@ class ClientsPage(BasePage):
         prix_wrap = tk.Frame(row_prix, bg=SURFACE); prix_wrap.grid(row=0, column=0, sticky="ew", padx=(0, 6))
         avance_wrap = tk.Frame(row_prix, bg=SURFACE); avance_wrap.grid(row=0, column=1, sticky="ew", padx=(6, 0))
         prix_e = field(prix_wrap, "Prix", rxg("prix"))
+        row_prix_remise = tk.Frame(body, bg=SURFACE); row_prix_remise.pack(fill="x")
+        prix_remise_e = field(row_prix_remise, "Prix après remise", "")
+        prix_remise_e.configure(state="readonly", readonlybackground=SURFACE, fg=TEXT)
         avance_e = field(avance_wrap, "Avance", rxg("avance"))
 
         tk.Label(body, text="JOUR DE LIVRAISON", font=FONT_MONO_SM, fg=SLATE, bg=SURFACE).pack(anchor="w", pady=(10, 4))
@@ -2512,57 +2705,133 @@ class ClientsPage(BasePage):
                             activebackground=SURFACE, width=4, relief="solid", borderwidth=1
                             ).pack(side="left", padx=(0, 4))
 
-        r_e = field(body, "R", rxg("r_texte"))
+        r_e = field(body, "R (reste)", rxg("r_texte"))
+        r_e.configure(state="readonly",
+                       readonlybackground=SURFACE,
+                       fg=TEXT)
 
-        def save():
+        def _parse_amount(raw):
+            try:
+                return float(str(raw or "").replace(" ", "").replace(",", ".").replace("DH", "").strip() or 0)
+            except ValueError:
+                return 0
+
+        def _read_remise():
+            try:
+                return float(str(remise_v.get() or "0").replace("%", "").strip() or 0)
+            except ValueError:
+                return 0
+
+        def _set_readonly(entry, text):
+            entry.configure(state="normal")
+            entry.delete(0, "end")
+            entry.insert(0, text)
+            entry.configure(state="readonly",
+                             readonlybackground=SURFACE,
+                             fg=TEXT)
+
+        def _recalc_all(*_a):
+            prix_v = _parse_amount(prix_e.get())
+            avance_v = _parse_amount(avance_e.get())
+            remise_pct = _read_remise()
+            prix_apres_remise = prix_v * (1 - remise_pct / 100)
+            _set_readonly(prix_remise_e, f"{prix_apres_remise:.0f}")
+            _set_readonly(r_e, f"{prix_apres_remise - avance_v:.0f}")
+
+        prix_e.bind("<KeyRelease>", _recalc_all)
+        avance_e.bind("<KeyRelease>", _recalc_all)
+        remise_v.trace_add("write", _recalc_all)
+        _recalc_all()
+
+        def _save_fiche():
+            """Persist the fiche. Returns (cid, nom) or None on validation failure.
+            Does NOT close the modal — callers decide."""
             nom = nom_e.get().strip()
             if not nom:
                 messagebox.showwarning("Champ requis", "Le nom est obligatoire.")
-                return
+                return None
             remise_val = int(remise_v.get().replace("%", "") or 0)
             conn = get_connection()
-            if c:
-                conn.execute("""UPDATE clients SET nom=?, prenom=?, tel=?, date_naissance=?, ville=?, remise=?
-                                 WHERE id=?""",
-                             (nom, prenom_e.get(), num_e.get(), naiss_e.get(), ville_e.get(), remise_val, c["id"]))
-                cid = c["id"]
-                action = f"Client modifié : {nom}"
-            else:
-                cid = conn.execute("""INSERT INTO clients (nom, prenom, tel, date_naissance, ville, remise)
-                                       VALUES (?,?,?,?,?,?)""",
-                                    (nom, prenom_e.get(), num_e.get(), naiss_e.get(), ville_e.get(), remise_val)).lastrowid
-                action = f"Client créé : {nom}"
+            try:
+                if c:
+                    conn.execute("""UPDATE clients SET nom=?, prenom=?, tel=?, date_naissance=?, ville=?, remise=?
+                                     WHERE id=?""",
+                                 (nom, prenom_e.get(), num_e.get(), naiss_e.get(), ville_e.get(),
+                                  remise_val, c["id"]))
+                    cid = c["id"]
+                    action = f"Client modifié : {nom}"
+                else:
+                    cid = conn.execute("""INSERT INTO clients (nom, prenom, tel, date_naissance, ville, remise)
+                                           VALUES (?,?,?,?,?,?)""",
+                                        (nom, prenom_e.get(), num_e.get(), naiss_e.get(),
+                                         ville_e.get(), remise_val)).lastrowid
+                    action = f"Client créé : {nom}"
 
-            conn.execute("""INSERT INTO prescriptions (
-                client_id, date, vl, vp, pg, arx_od, arx_og, av_od, av_og, av_odg,
-                prescripteur, date_prescription, mutuelle_oui, mutuelle_texte,
-                maladie_oui, maladie_texte, montage_oui, montage_texte,
-                od_sph, od_cyl, od_axe, od_add, od_ep, od_ht,
-                og_sph, og_cyl, og_axe, og_add, og_ep, og_ht,
-                verres_texte, verres_check, firme_texte, firme_check, monture_texte, monture_check,
-                prix, avance, jour_livraison, r_texte,
-                lentille_texte, lentille_check
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
-                cid, today_iso(), int(vl_var.get()), int(vp_var.get()), int(pg_var.get()),
-                arx_od_e.get(), arx_og_e.get(), av_od_e.get(), av_og_e.get(), av_odg_e.get(),
-                prescripteur_e.get(), presc_date_e.get(),
-                1 if mutuelle_var.get() == "oui" else 0, mutuelle_txt_e.get(),
-                1 if maladie_var.get() == "oui" else 0, maladie_txt_e.get(),
-                1 if montage_var.get() == "oui" else 0, montage_txt_e.get(),
-                od_sph.get(), od_cyl.get(), od_axe.get(), od_add.get(), od_ep.get(), od_ht.get(),
-                og_sph.get(), og_cyl.get(), og_axe.get(), og_add.get(), og_ep.get(), og_ht.get(),
-                verres_e.get(), int(verres_c.get()), firme_e.get(), int(firme_c.get()),
-                monture_e.get(), int(monture_c.get()),
-                prix_e.get(), avance_e.get(), jour_var.get(), r_e.get(),
-                lentille_e.get(), int(lentille_c.get()),
-            ))
-            conn.commit()
-            conn.close()
+                conn.execute("""INSERT INTO prescriptions (
+                    client_id, date, vl, vp, pg, arx_od, arx_og, av_od, av_og, av_odg,
+                    prescripteur, date_prescription, mutuelle_oui, mutuelle_texte,
+                    maladie_oui, maladie_texte, montage_oui, montage_texte,
+                    od_sph, od_cyl, od_axe, od_add, od_ep, od_ht,
+                    og_sph, og_cyl, og_axe, og_add, og_ep, og_ht,
+                    verres_texte, verres_check, firme_texte, firme_check, monture_texte, monture_check,
+                    prix, avance, jour_livraison, r_texte,
+                    lentille_texte, lentille_check
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
+                    cid, today_iso(), int(vl_var.get()), int(vp_var.get()), int(pg_var.get()),
+                    arx_od_e.get(), arx_og_e.get(), av_od_e.get(), av_og_e.get(), av_odg_e.get(),
+                    prescripteur_e.get(), presc_date_e.get(),
+                    1 if mutuelle_var.get() == "oui" else 0, mutuelle_txt_e.get(),
+                    1 if maladie_var.get() == "oui" else 0, maladie_txt_e.get(),
+                    1 if montage_var.get() == "oui" else 0, montage_txt_e.get(),
+                    od_sph.get(), od_cyl.get(), od_axe.get(), od_add.get(), od_ep.get(), od_ht.get(),
+                    og_sph.get(), og_cyl.get(), og_axe.get(), og_add.get(), og_ep.get(), og_ht.get(),
+                    verres_e.get(), int(verres_c.get()), firme_e.get(), int(firme_c.get()),
+                    monture_e.get(), int(monture_c.get()),
+                    prix_e.get(), avance_e.get(), jour_var.get(), r_e.get(),
+                    lentille_e.get(), int(lentille_c.get()),
+                ))
+                conn.commit()
+            finally:
+                conn.close()
             log_action(self.app.current_user["username"], action)
+            return cid, nom
+
+        def save():
+            if _save_fiche() is None:
+                return
             modal.destroy()
             self.refresh()
 
-        modal.buttons(save)
+        def create_sale():
+            result = _save_fiche()
+            if result is None:
+                return
+            cid, nom = result
+            prix_val = _parse_amount(prix_e.get())
+            avance_val = _parse_amount(avance_e.get())
+            remise_val = int(remise_v.get().replace("%", "") or 0)
+            full_name = f"{nom} {prenom_e.get().strip()}".strip()
+
+            modal.destroy()
+            self.refresh()
+
+            main = self.app.main_frame
+            if main and "sales" in main.pages:
+                main.show_page("sales")
+                main.pages["sales"].open_form(prefill={
+                    "client_name": full_name,
+                    "monture": prix_val,
+                    "verres": 0,
+                    "remise": remise_val,
+                    "avance": avance_val,
+                })
+
+        primary_button(modal.footer, "Enregistrer", save, icon="check").pack(
+            side="left", fill="x", expand=True, ipady=4, padx=(0, 8))
+        outline_button(modal.footer, "Créer une vente", create_sale, icon="sales").pack(
+            side="left", ipady=4, padx=(0, 8))
+        outline_button(modal.footer, "Annuler", modal._on_close, icon="close").pack(
+            side="left", ipady=4)
 
 
 # ================================================================== APPOINTMENTS
@@ -2571,13 +2840,16 @@ class AppointmentsPage(BasePage):
         super().__init__(parent, app)
         self.header("Agenda", "Rendez-vous", "+ Nouveau RDV", self.open_form)
         self.search_var = self.make_search_box("Rechercher un rendez-vous…")
+
+        btns = tk.Frame(self, bg=CONTENT_BG)
+        btns.pack(fill="x", pady=(8, 12))
+        outline_button(btns, "Modifier la sélection", lambda: self.open_form(self._selected_id()), icon="edit").pack(side="left")
+        danger_button(btns, "Supprimer", self.delete_selected).pack(side="left", padx=(8, 12))
+        outline_button(btns, "Envoyer rappel WhatsApp", self.send_whatsapp_reminder, icon="bell").pack(side="left")
+
         self.tree = self.make_table(["Date", "Heure", "Client", "Service", "Statut"])
         self.tree.bind("<Double-1>", lambda e: self.open_form(self._selected_id()))
-        btns = tk.Frame(self, bg=CONTENT_BG)
-        btns.pack(fill="x", pady=(8, 0))
-        outline_button(btns, "Modifier la sélection", lambda: self.open_form(self._selected_id()), icon="edit").pack(side="left")
-        danger_button(btns, "Supprimer", self.delete_selected).pack(side="left", padx=(0, 12))
-        outline_button(btns, "Envoyer rappel WhatsApp", self.send_whatsapp_reminder, icon="bell").pack(side="left")
+        
 
     def send_whatsapp_reminder(self):
         aid = self._selected_id()
@@ -2649,7 +2921,7 @@ class AppointmentsPage(BasePage):
         cb.pack(fill="x", ipady=2)
 
         date_e = field_date(body, "Date (AAAA-MM-JJ)", a["date"] if a else today_iso())
-        heure_e = field(body, "Heure (HH:MM)", a["heure"] if a else "10:00")
+        heure_e = field_hour(body, "Heure", a["heure"] if a else "10:00")
         service_v = dropdown(body, "Service", SERVICES_RDV, a["service"] if a else SERVICES_RDV[0])
         statut_v = dropdown(body, "Statut", STATUTS_RDV, a["statut"] if a else STATUTS_RDV[0])
 
@@ -2682,13 +2954,15 @@ class StockPage(BasePage):
         super().__init__(parent, app)
         self.header("Inventaire", "Stock", "+ Nouvel article", self.open_form)
         self.search_var = self.make_search_box("Rechercher un article…")
+
+        btns = tk.Frame(self, bg=CONTENT_BG)
+        btns.pack(fill="x", pady=(8, 12))
+        outline_button(btns, "Voir la fiche", lambda: self.open_detail(self._selected_id()), icon="search").pack(side="left")
+        danger_button(btns, "Supprimer", self.delete_selected).pack(side="left", padx=(8, 12))
+
         self.tree = self.make_table(["Photo", "Article", "Catégorie", "Marque", "Qté", "Prix vente", "Statut"])
         self.tree.bind("<Double-1>", lambda e: self.open_detail(self._selected_id()))
-        btns = tk.Frame(self, bg=CONTENT_BG)
-        btns.pack(fill="x", pady=(8, 0))
-        outline_button(btns, "Voir la fiche", lambda: self.open_detail(self._selected_id()), icon="search").pack(side="left")
-        danger_button(btns, "Supprimer", self.delete_selected).pack(side="left", padx=(0, 12))
-
+        
     def _selected_id(self):
         sel = self.tree.selection()
         return int(sel[0]) if sel else None
@@ -2908,17 +3182,19 @@ class SalesPage(BasePage):
         self.header("Registre", "Ventes", "+ Nouvelle vente", self.open_form)
         self.search_var = self.make_search_box("Rechercher une vente (client, paiement)…")
 
+        btns = tk.Frame(self, bg=CONTENT_BG)
+        btns.pack(fill="x", pady=(8, 12))
+        outline_button(btns, "Modifier la sélection", lambda: self.open_form(self._selected_id()), icon="edit").pack(side="left")
+        danger_button(btns, "Supprimer", self.delete_selected).pack(side="left", padx=(8, 12))
+        outline_button(btns, "Facture PDF", self.print_facture, icon="document").pack(side="left", padx=(8, 12))
+        outline_button(btns, "Facture Word", self.print_facture_docx, icon="document").pack(side="left")
+
         self.totals_row = tk.Frame(self, bg=CONTENT_BG)
         self.totals_row.pack(fill="x", pady=(0, 10))
 
         self.tree = self.make_table(["Date", "Client", "Vente", "Avance", "Reste", "Remise", "Paiement"])
         self.tree.bind("<Double-1>", lambda e: self.open_form(self._selected_id()))
-        btns = tk.Frame(self, bg=CONTENT_BG)
-        btns.pack(fill="x", pady=(8, 0))
-        outline_button(btns, "Modifier la sélection", lambda: self.open_form(self._selected_id()), icon="edit").pack(side="left")
-        danger_button(btns, "Supprimer", self.delete_selected).pack(side="left", padx=(0, 12))
-        outline_button(btns, "Facture PDF", self.print_facture, icon="document").pack(side="left", padx=(0, 12))
-        outline_button(btns, "Facture Word", self.print_facture_docx, icon="document").pack(side="left")
+        
 
     def _selected_id(self):
         sel = self.tree.selection()
@@ -2981,7 +3257,7 @@ class SalesPage(BasePage):
         log_action(self.app.current_user["username"], "Vente supprimée")
         self.refresh()
 
-    def open_form(self, sale_id=None):
+    def open_form(self, sale_id=None, prefill=None):
         conn = get_connection()
         s = conn.execute("SELECT * FROM sales WHERE id=?", (sale_id,)).fetchone() if sale_id else None
         clients = conn.execute("SELECT * FROM clients ORDER BY nom").fetchall()
@@ -2993,6 +3269,8 @@ class SalesPage(BasePage):
             for name, cid in client_map.items():
                 if cid == s["client_id"]:
                     current_name = name
+        if prefill and not current_name:
+            current_name = prefill.get("client_name", "")
 
         modal = ModalForm(self.app, "Modifier vente" if s else "Nouvelle vente", width=400)
         body = modal.body
@@ -3019,6 +3297,59 @@ class SalesPage(BasePage):
         remise_options = [f"{d}%" for d in DISCOUNT_OPTIONS]
         default_remise = f"{s['remise']}%" if s and s["remise"] else "0%"
         remise_v = dropdown(remise_wrap, "Remise", remise_options, default_remise)
+
+                # Auto-calc Vente totale from Monture + Verres − Remise
+        def _parse_amount(raw):
+            try:
+                return float(str(raw or "").replace(" ", "").replace(",", ".").replace("DH", "").strip() or 0)
+            except ValueError:
+                return 0
+
+        def update_vente(*_a):
+            m = _parse_amount(monture_e.get())
+            v = _parse_amount(verres_e.get())
+            try:
+                r = float(str(remise_v.get() or "0").replace("%", "").strip() or 0)
+            except ValueError:
+                r = 0
+            total = (m + v) * (1 - r / 100)
+            vente_e.delete(0, "end")
+            vente_e.insert(0, f"{total:.0f}")
+
+        monture_e.bind("<KeyRelease>", update_vente)
+        verres_e.bind("<KeyRelease>", update_vente)
+        remise_v.trace_add("write", update_vente)
+
+        # Apply prefill from the client fiche, if any
+        if prefill:
+            monture_e.delete(0, "end"); monture_e.insert(0, str(prefill.get("monture", 0)))
+            verres_e.delete(0, "end"); verres_e.insert(0, str(prefill.get("verres", 0)))
+            avance_e.delete(0, "end"); avance_e.insert(0, str(prefill.get("avance", 0)))
+            mutuelle_e.delete(0, "end"); mutuelle_e.insert(0, str(prefill.get("mutuelle", 0)))
+            # Set remise last — it triggers update_vente, computing Vente totale from the values above.
+            remise_v.set(f"{prefill.get('remise', 0)}%")
+
+
+        def _parse_amount(raw):
+            try:
+                return float(str(raw or "").replace(" ", "").replace(",", ".").replace("DH", "").strip() or 0)
+            except ValueError:
+                return 0
+
+        def update_vente(*_a):
+            m = _parse_amount(monture_e.get())
+            v = _parse_amount(verres_e.get())
+            try:
+                r = float(str(remise_v.get() or "0").replace("%", "").strip() or 0)
+            except ValueError:
+                r = 0
+            total = (m + v) * (1 - r / 100)
+            vente_e.delete(0, "end")
+            vente_e.insert(0, f"{total:.0f}")
+
+        monture_e.bind("<KeyRelease>", update_vente)
+        verres_e.bind("<KeyRelease>", update_vente)
+        remise_v.trace_add("write", update_vente)
 
         def on_client_change(*_a):
             if not s and client_var.get() in client_map:  # ne préremplit que pour une nouvelle vente
@@ -3639,8 +3970,9 @@ def generate_facture_docx(sale, client, rx):
     # ---------- mapping (names must match the content control tags in the template) ----------
     values = {
         "numero":     str(sale["id"]),
-        "date_jour":  date_str,
-        "client_1":   client["nom"] if client else "client",
+        "date_jour":  f"{dd} / {mm_} / {yyyy}",
+        "client_1":   (f"{client['nom']} {client['prenom'] or ''}".strip()
+                       if client else "client"),
         "loin_od_1":  loin_od,
         "loin_og_1":  loin_og,
         "pres_od_1":  pres_od,
@@ -3653,7 +3985,7 @@ def generate_facture_docx(sale, client, rx):
         "prix_verres_1":  f"{sale['verres']:.0f},00",
         "montant_verres_1": f"{sale['verres']:.0f},00",
         "total_1":        f"{sale['vente']:.0f},00",
-        "somme_lettres_1": num_to_french_words(sale["vente"]).upper(),
+        "somme_lettres_1": num_to_french_words(sale["vente"]).upper() + " DIRHAMS",
         
     }
 
@@ -3683,14 +4015,16 @@ class ExpensesPage(BasePage):
         self.btn_personal.pack(side="left")
 
         self.search_var = self.make_search_box("Rechercher une dépense…")
+
+        btns = tk.Frame(self, bg=CONTENT_BG)
+        btns.pack(fill="x", pady=(8, 12))
+        outline_button(btns, "Modifier la sélection", lambda: self.open_form(self._selected_id()), icon="edit").pack(side="left")
+        danger_button(btns, "Supprimer", self.delete_selected).pack(side="left", padx=(8, 12))
+        self._update_toggle_style()
         self.tree = self.make_table(["Date", "Libellé", "Catégorie", "Montant", "Échéance", "Récurrent", "Payé"])
         self.tree.tag_configure("paid", background="#E8F5EC", foreground="#2E7D46")
         self.tree.bind("<Double-1>", lambda e: self.open_form(self._selected_id()))
-        btns = tk.Frame(self, bg=CONTENT_BG)
-        btns.pack(fill="x", pady=(8, 0))
-        outline_button(btns, "Modifier la sélection", lambda: self.open_form(self._selected_id()), icon="edit").pack(side="left")
-        danger_button(btns, "Supprimer", self.delete_selected).pack(side="left", padx=(0, 12))
-        self._update_toggle_style()
+        
 
     def set_mode(self, personal):
         self.show_personal = personal
@@ -3834,7 +4168,7 @@ class UsersPage(BasePage):
         btns = tk.Frame(self, bg=CONTENT_BG)
         btns.pack(fill="x", pady=(8, 14))
         outline_button(btns, "Modifier la sélection", lambda: self.open_form(self._selected_id()), icon="edit").pack(side="left")
-        danger_button(btns, "Supprimer", self.delete_selected).pack(side="left", padx=(0, 12))
+        danger_button(btns, "Supprimer", self.delete_selected).pack(side="left", padx=(8, 12))
 
         tk.Label(self, text="Journal d'activité", font=FONT_DISPLAY_SM, bg=CONTENT_BG, fg=TEXT).pack(anchor="w", pady=(6, 8))
         self.audit_search_var = self.make_search_box("Rechercher dans le journal (utilisateur, action)…")
@@ -3950,21 +4284,23 @@ class FacturesPage(BasePage):
         self.header("Documents", "Factures", "+ Ajouter manuellement", self.open_form)
 
         toggle_row = tk.Frame(self, bg=CONTENT_BG)
-        toggle_row.pack(fill="x", pady=(0, 10))
+        toggle_row.pack(fill="x", pady=(8, 12))
         self.btn_client = self.mode_button(toggle_row, "Factures clients", lambda: self.set_type("client"))
-        self.btn_client.pack(side="left", padx=(0, 8))
+        self.btn_client.pack(side="left", padx=(0, 12))
         self.btn_entreprise = self.mode_button(toggle_row, "Factures de l'entreprise",
                                                 lambda: self.set_type("entreprise"))
-        self.btn_entreprise.pack(side="left")
+        self.btn_entreprise.pack(side="left", padx=(8, 12))
 
         self.search_var = self.make_search_box("Rechercher une facture…")
+
+        btns = tk.Frame(self, bg=CONTENT_BG)
+        btns.pack(fill="x", pady=(8, 12))
+        outline_button(btns, "Ouvrir le fichier", self.open_selected_file, icon="document").pack(side="left")
+        outline_button(btns, "Modifier", lambda: self.open_form(self._selected_id()), icon="edit").pack(side="left", padx=(8, 12))
+        danger_button(btns, "Supprimer", self.delete_selected).pack(side="left", padx=(0, 12))
         self.tree = self.make_table(["Titre", "Date", "Montant", "Fichier"])
         self.tree.bind("<Double-1>", lambda e: self.open_selected_file())
-        btns = tk.Frame(self, bg=CONTENT_BG)
-        btns.pack(fill="x", pady=(8, 0))
-        outline_button(btns, "Ouvrir le fichier", self.open_selected_file, icon="document").pack(side="left")
-        outline_button(btns, "Modifier", lambda: self.open_form(self._selected_id()), icon="edit").pack(side="left", padx=(12, 0))
-        danger_button(btns, "Supprimer", self.delete_selected).pack(side="left", padx=(12, 0))
+        
         self._update_toggle_style()
 
     def set_type(self, t):
@@ -4103,6 +4439,19 @@ class TypesPage(BasePage):
                              "l'application (catégories, marques, types de lentilles…).",
                   font=FONT_BODY, bg=CONTENT_BG, fg=SLATE, wraplength=760, justify="left").pack(anchor="w", pady=(0, 16))
 
+        btns = tk.Frame(self, bg=CONTENT_BG)
+        btns.pack(fill="x", pady=(8, 12))
+        danger_button(btns, "Supprimer la sélection", self.delete_selected).pack(side="left")
+
+        add_row = tk.Frame(self, bg=CONTENT_BG)
+        add_row.pack(fill="x", pady=(0, 12))
+        self.new_value_entry = tk.Entry(add_row, font=FONT_BODY, relief="solid", borderwidth=1,
+                                         bg=SURFACE, fg=TEXT, insertbackground=TEXT)
+        self.new_value_entry.pack(side="left", fill="x", expand=True, ipady=6, padx=(0, 8))
+        self.new_value_entry.bind("<Return>", lambda e: self.add_value())
+        primary_button(add_row, "Ajouter", self.add_value, icon="plus").pack(side="left")
+
+
         picker_row = tk.Frame(self, bg=CONTENT_BG)
         picker_row.pack(fill="x", pady=(0, 12))
         tk.Label(picker_row, text="LISTE", font=FONT_MONO_SM, fg=SLATE, bg=CONTENT_BG).pack(side="left", padx=(0, 8))
@@ -4114,18 +4463,9 @@ class TypesPage(BasePage):
         picker.pack(side="left")
         picker.bind("<<ComboboxSelected>>", lambda e: self.refresh())
 
-        add_row = tk.Frame(self, bg=CONTENT_BG)
-        add_row.pack(fill="x", pady=(0, 12))
-        self.new_value_entry = tk.Entry(add_row, font=FONT_BODY, relief="solid", borderwidth=1,
-                                         bg=SURFACE, fg=TEXT, insertbackground=TEXT)
-        self.new_value_entry.pack(side="left", fill="x", expand=True, ipady=6, padx=(0, 8))
-        self.new_value_entry.bind("<Return>", lambda e: self.add_value())
-        primary_button(add_row, "Ajouter", self.add_value, icon="plus").pack(side="left")
-
+        
         self.tree = self.make_table(["Valeur"], height=12)
-        btns = tk.Frame(self, bg=CONTENT_BG)
-        btns.pack(fill="x", pady=(8, 0))
-        danger_button(btns, "Supprimer la sélection", self.delete_selected).pack(side="left")
+        
 
     def _current_categorie(self):
         return self.label_to_key.get(self.picker_var.get(), TYPE_CATEGORIES[0][0])
@@ -4187,13 +4527,15 @@ class CommandesPage(BasePage):
         self.btn_fournisseur.pack(side="left")
 
         self.search_var = self.make_search_box("Rechercher une commande…")
+
+        btns = tk.Frame(self, bg=CONTENT_BG)
+        btns.pack(fill="x", pady=(8, 12))
+        outline_button(btns, "Modifier la sélection", lambda: self.open_form(self._selected_id()), icon="edit").pack(side="left")
         self.tree = self.make_table(["Client / Fournisseur", "Description", "Commandée le",
                                       "Prévue le", "Statut", "Alerte"])
         self.tree.bind("<Double-1>", lambda e: self.open_form(self._selected_id()))
-        btns = tk.Frame(self, bg=CONTENT_BG)
-        btns.pack(fill="x", pady=(8, 0))
-        outline_button(btns, "Modifier la sélection", lambda: self.open_form(self._selected_id()), icon="edit").pack(side="left")
-        danger_button(btns, "Supprimer", self.delete_selected).pack(side="left", padx=(0, 12))
+        
+        danger_button(btns, "Supprimer", self.delete_selected).pack(side="left", padx=(8, 12))
         self._update_toggle_style()
 
     def set_type(self, t):
