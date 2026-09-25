@@ -1,6 +1,6 @@
 {
-  "version": "1.0.1",
-  "url": "https://github.com/Raynoks/Optilux-Desktop/releases/download/1.0.1/Optilux-Setup-1.0.1.exe",
-  "notes": "Améliorations d'interface, saisie d'heure, calculs automatiques.",
+  "version": "1.0.2",
+  "url": "https://github.com/Raynoks/Optilux-Desktop/releases/download/1.0.2/Optilux-Setup-1.0.2.exe",
+  "notes": "Nouvelles fonctionnalités d'interface et références.",
   "mandatory": false
 }

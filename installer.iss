@@ -1,7 +1,7 @@
 ; installer.iss — Optilux Desktop installer
 
 #define MyAppName "Optilux"
-#define MyAppVersion "1.0.1"
+#define MyAppVersion "1.0.2"
 #define MyAppPublisher "Optilux"
 #define MyAppExeName "Optilux.exe"
 

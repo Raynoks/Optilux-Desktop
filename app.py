@@ -21,7 +21,7 @@ from notifications import notify
 from whatsapp import send_whatsapp, normalize_phone
 
 
-APP_VERSION = "1.0.1"           # bump this on every release
+APP_VERSION = "1.0.2"           # bump this on every release
 UPDATE_URL = "https://raw.githubusercontent.com/Raynoks/Optilux-Desktop/main/latest.json"
 
 # Bundled assets live inside the PyInstaller extraction folder (read-only);
@@ -1044,7 +1044,7 @@ class OptiluxApp(tk.Tk):
 
         apply_theme(get_setting("theme", "light"))
 
-        self.title("OPTILUX — Gestion (v1.0.1)")
+        self.title("OPTILUX — Gestion (v1.0.2)")
         self.geometry("1200x800")
         self.minsize(1200, 800)
         self.state("zoomed")
@@ -2399,12 +2399,19 @@ class ClientsPage(BasePage):
                         tk.Label(table, text=rxg(f"{eye}_{field_key}"), font=FONT_MONO_SM, fg=TEXT,
                                   bg=SURFACE).grid(row=r, column=i, padx=4, pady=2)
 
-                self.section_label(body, "Verres / Firme / Monture / Lentille")
-                self.info_row(body, "Verres", rxg("verres_texte"))
-                self.info_row(body, "Firme", rxg("firme_texte"))
-                self.info_row(body, "Monture", rxg("monture_texte"))
-                self.info_row(body, "Lentille", rxg("lentille_texte"))
-
+                self.section_label(body, "Verres / Firme / Monture / Lentilles")
+                v_txt = (rxg("verres_texte", "") + ("  ✓" if rx["verres_check"] else "")).strip()
+                f_txt = (rxg("firme_texte", "") + ("  ✓" if rx["firme_check"] else "")).strip()
+                m_txt = (rxg("monture_texte", "") + ("  ✓" if rx["monture_check"] else "")).strip()
+                l_txt = (rxg("lentille_texte", "") + ("  ✓" if rx["lentille_check"] else "")).strip()
+                self.info_row(body, "Verres", v_txt)
+                self.info_row(body, "Réf. verres", rxg("verres_ref"))
+                self.info_row(body, "Firme", f_txt)
+                self.info_row(body, "Réf. firme", rxg("firme_ref"))
+                self.info_row(body, "Monture", m_txt)
+                self.info_row(body, "Réf. monture", rxg("monture_ref"))
+                self.info_row(body, "Lentilles", l_txt)
+                self.info_row(body, "Réf. lentilles", rxg("lentille_ref"))
 
 
                 self.section_label(body, "Prix")
@@ -2543,14 +2550,19 @@ class ClientsPage(BasePage):
                     tk.Label(tbl, text=g(rx, f"{eye}_{key}"), font=FONT_MONO_SM,
                               fg=TEXT, bg=SURFACE).grid(row=r, column=i, padx=6, pady=2)
 
-            section(card, "Verres / Firme / Monture")
-            v_txt = (g(rx, "verres_texte") + ("  ✓" if rx["verres_check"] else "")).strip()
-            f_txt = (g(rx, "firme_texte") + ("  ✓" if rx["firme_check"] else "")).strip()
-            m_txt = (g(rx, "monture_texte") + ("  ✓" if rx["monture_check"] else "")).strip()
+            section(card, "Verres / Firme / Monture / Lentilles")
+            v_txt = (g(rx, "verres_texte", "") + ("  ✓" if rx["verres_check"] else "")).strip()
+            f_txt = (g(rx, "firme_texte", "") + ("  ✓" if rx["firme_check"] else "")).strip()
+            m_txt = (g(rx, "monture_texte", "") + ("  ✓" if rx["monture_check"] else "")).strip()
+            l_txt = (g(rx, "lentille_texte", "") + ("  ✓" if rx["lentille_check"] else "")).strip()
             info(card, "Verres", v_txt)
+            info(card, "Réf. verres", g(rx, "verres_ref"))
             info(card, "Firme", f_txt)
+            info(card, "Réf. firme", g(rx, "firme_ref"))
             info(card, "Monture", m_txt)
-            info(card, "Lentille", g(rx, "lentille_texte"))
+            info(card, "Réf. monture", g(rx, "monture_ref"))
+            info(card, "Lentilles", l_txt)
+            info(card, "Réf. lentilles", g(rx, "lentille_ref"))
 
             section(card, "Prix")
             info(card, "Prix / Avance", f"{g(rx, 'prix')} / {g(rx, 'avance')}")
@@ -2671,30 +2683,56 @@ class ClientsPage(BasePage):
         og_ep = mini_entry(table, 2, 5, rxg("og_ep")); og_ht = mini_entry(table, 2, 6, rxg("og_ht"))
 
         # ---- Verres / Firme / Monture ----
-        def text_with_check(label_text, initial_text, initial_check):
-            row = tk.Frame(body, bg=SURFACE); row.pack(fill="x")
+        def text_with_check(label_text, initial_text, initial_check, initial_ref=""):
+            row = tk.Frame(body, bg=SURFACE)
+            row.pack(fill="x")
             row.grid_columnconfigure(0, weight=1)
-            wrap = tk.Frame(row, bg=SURFACE); wrap.grid(row=0, column=0, sticky="ew")
+            row.grid_columnconfigure(1, weight=0)
+
+            wrap = tk.Frame(row, bg=SURFACE)
+            wrap.grid(row=0, column=0, sticky="ew")
             e = field(wrap, label_text, initial_text)
+
+            ref_wrap = tk.Frame(row, bg=SURFACE)
+            ref_wrap.grid(row=0, column=1, sticky="ew", padx=(8, 0))
+            tk.Label(ref_wrap, text="RÉF.", font=FONT_MONO_SM, fg=SLATE, bg=SURFACE,
+                      anchor="w").pack(fill="x", pady=(8, 2))
+            ref_e = tk.Entry(ref_wrap, font=FONT_BODY, relief="solid", borderwidth=1,
+                              width=5, bg=SURFACE, fg=TEXT, insertbackground=TEXT,
+                              justify="center",
+                              highlightbackground=BORDER, highlightcolor=RED,
+                              highlightthickness=1)
+            ref_e.insert(0, initial_ref or "")
+            ref_e.pack(ipady=4)
+
             cvar = tk.BooleanVar(value=bool(initial_check))
-            tk.Checkbutton(row, variable=cvar, bg=SURFACE, activebackground=SURFACE,
-                            selectcolor=SURFACE).grid(row=0, column=1, padx=(8, 0), pady=(18, 0))
-            return e, cvar
+            tk.Checkbutton(row, variable=cvar, bg=SURFACE,
+                            fg=TEXT, activeforeground=TEXT,
+                            activebackground=SURFACE,
+                            selectcolor=SURFACE).grid(row=0, column=2, padx=(8, 0), pady=(18, 0))
+            return e, cvar, ref_e
 
-        verres_e, verres_c = text_with_check("Verres", rxg("verres_texte"), rxg("verres_check", 0))
-        firme_e, firme_c = text_with_check("Firme", rxg("firme_texte"), rxg("firme_check", 0))
-        monture_e, monture_c = text_with_check("Monture", rxg("monture_texte"), rxg("monture_check", 0))
-        lentille_e, lentille_c = text_with_check("Lentilles", rxg("lentille_texte"), rxg("lentille_check", 0))
+        verres_e, verres_c, verres_r = text_with_check(
+            "Verres", rxg("verres_texte"), rxg("verres_check", 0), rxg("verres_ref"))
+        firme_e, firme_c, firme_r = text_with_check(
+            "Firme", rxg("firme_texte"), rxg("firme_check", 0), rxg("firme_ref"))
+        monture_e, monture_c, monture_r = text_with_check(
+            "Monture", rxg("monture_texte"), rxg("monture_check", 0), rxg("monture_ref"))
+        lentille_e, lentille_c, lentille_r = text_with_check(
+            "Lentilles", rxg("lentille_texte"), rxg("lentille_check", 0), rxg("lentille_ref"))
 
+        # Row 1: Prix | Prix après remise
         row_prix = tk.Frame(body, bg=SURFACE); row_prix.pack(fill="x")
         row_prix.grid_columnconfigure(0, weight=1); row_prix.grid_columnconfigure(1, weight=1)
         prix_wrap = tk.Frame(row_prix, bg=SURFACE); prix_wrap.grid(row=0, column=0, sticky="ew", padx=(0, 6))
-        avance_wrap = tk.Frame(row_prix, bg=SURFACE); avance_wrap.grid(row=0, column=1, sticky="ew", padx=(6, 0))
+        prix_remise_wrap = tk.Frame(row_prix, bg=SURFACE); prix_remise_wrap.grid(row=0, column=1, sticky="ew", padx=(6, 0))
         prix_e = field(prix_wrap, "Prix", rxg("prix"))
-        row_prix_remise = tk.Frame(body, bg=SURFACE); row_prix_remise.pack(fill="x")
-        prix_remise_e = field(row_prix_remise, "Prix après remise", "")
+        prix_remise_e = field(prix_remise_wrap, "Prix après remise", "")
         prix_remise_e.configure(state="readonly", readonlybackground=SURFACE, fg=TEXT)
-        avance_e = field(avance_wrap, "Avance", rxg("avance"))
+
+        # Row 2: Avance
+        row_avance = tk.Frame(body, bg=SURFACE); row_avance.pack(fill="x")
+        avance_e = field(row_avance, "Avance", rxg("avance"))
 
         tk.Label(body, text="JOUR DE LIVRAISON", font=FONT_MONO_SM, fg=SLATE, bg=SURFACE).pack(anchor="w", pady=(10, 4))
         jour_var = tk.StringVar(value=rxg("jour_livraison"))
@@ -2775,8 +2813,9 @@ class ClientsPage(BasePage):
                     og_sph, og_cyl, og_axe, og_add, og_ep, og_ht,
                     verres_texte, verres_check, firme_texte, firme_check, monture_texte, monture_check,
                     prix, avance, jour_livraison, r_texte,
-                    lentille_texte, lentille_check
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
+                    lentille_texte, lentille_check,
+                    verres_ref, firme_ref, monture_ref, lentille_ref
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
                     cid, today_iso(), int(vl_var.get()), int(vp_var.get()), int(pg_var.get()),
                     arx_od_e.get(), arx_og_e.get(), av_od_e.get(), av_og_e.get(), av_odg_e.get(),
                     prescripteur_e.get(), presc_date_e.get(),
@@ -2789,6 +2828,7 @@ class ClientsPage(BasePage):
                     monture_e.get(), int(monture_c.get()),
                     prix_e.get(), avance_e.get(), jour_var.get(), r_e.get(),
                     lentille_e.get(), int(lentille_c.get()),
+                    verres_r.get(), firme_r.get(), monture_r.get(), lentille_r.get(),
                 ))
                 conn.commit()
             finally:
@@ -2824,6 +2864,7 @@ class ClientsPage(BasePage):
                     "verres": 0,
                     "remise": remise_val,
                     "avance": avance_val,
+                    "date": presc_date_e.get(),
                 })
 
         primary_button(modal.footer, "Enregistrer", save, icon="check").pack(
@@ -2845,13 +2886,14 @@ class AppointmentsPage(BasePage):
         btns.pack(fill="x", pady=(8, 12))
         outline_button(btns, "Modifier la sélection", lambda: self.open_form(self._selected_id()), icon="edit").pack(side="left")
         danger_button(btns, "Supprimer", self.delete_selected).pack(side="left", padx=(8, 12))
-        outline_button(btns, "Envoyer rappel WhatsApp", self.send_whatsapp_reminder, icon="bell").pack(side="left")
+        outline_button(btns, "Envoyer rappel WhatsApp (Fr)", lambda: self.send_whatsapp_reminder(lang="fr"), icon="bell").pack(side="left")
+        outline_button(btns, "Envoyer rappel WhatsApp (Ar)", lambda: self.send_whatsapp_reminder(lang="ar"), icon="bell").pack(side="left")
 
         self.tree = self.make_table(["Date", "Heure", "Client", "Service", "Statut"])
         self.tree.bind("<Double-1>", lambda e: self.open_form(self._selected_id()))
         
 
-    def send_whatsapp_reminder(self):
+    def send_whatsapp_reminder(self, lang="fr"):
         aid = self._selected_id()
         if not aid:
             messagebox.showinfo("Info", "Sélectionnez un rendez-vous.")
@@ -2865,11 +2907,17 @@ class AppointmentsPage(BasePage):
                                     f"Aucun numéro de téléphone trouvé pour « {a['client_nom']} » "
                                     "dans sa fiche client.")
             return
-        msg = (f"Bonjour {a['client_nom']}, un rappel de votre rendez-vous chez OPTILUX "
-               f"le {a['date']} à {a['heure']} ({a['service']}). À bientôt !")
+        if lang == "ar":
+            msg = (f"مرحباً {a['client_nom']}، نذكّركم بموعدكم في OPTILUX "
+                   f"يوم {a['date']} على الساعة {a['heure']} ({a['service']}). "
+                   f"إلى اللقاء!")
+        else:
+            msg = (f"Bonjour M./Mme {a['client_nom']}, un rappel de votre rendez-vous chez OPTILUX "
+                   f"le {a['date']} à {a['heure']} ({a['service']}). À bientôt !")
         sent = send_whatsapp(phone, msg)
         if sent:
-            log_action(self.app.current_user["username"], f"Rappel WhatsApp envoyé : {a['client_nom']}")
+            log_action(self.app.current_user["username"],
+                       f"Rappel WhatsApp ({lang}) envoyé : {a['client_nom']}")
             messagebox.showinfo("En cours d'envoi",
                                  "WhatsApp Web va s'ouvrir dans votre navigateur pour envoyer le message.\n\n"
                                  "Assurez-vous d'être déjà connecté à WhatsApp Web (une seule fois, par QR code).")
@@ -3280,7 +3328,7 @@ class SalesPage(BasePage):
                            state="readonly", font=FONT_BODY, style="Themed.TCombobox")
         cb.pack(fill="x", ipady=2)
 
-        date_e = field(body, "Date (AAAA-MM-JJ)", s["date"] if s else today_iso())
+        date_e = field_date(body, "Date", s["date"] if s else today_iso())
         row = tk.Frame(body, bg=SURFACE); row.pack(fill="x")
         monture_e = field(row, "Monture (DH)", str(s["monture"]) if s else "0")
         verres_e = field(row, "Verres / LSH (DH)", str(s["verres"]) if s else "0")
@@ -3322,11 +3370,12 @@ class SalesPage(BasePage):
 
         # Apply prefill from the client fiche, if any
         if prefill:
+            if prefill.get("date"):
+                date_e.set(prefill["date"])
             monture_e.delete(0, "end"); monture_e.insert(0, str(prefill.get("monture", 0)))
             verres_e.delete(0, "end"); verres_e.insert(0, str(prefill.get("verres", 0)))
             avance_e.delete(0, "end"); avance_e.insert(0, str(prefill.get("avance", 0)))
             mutuelle_e.delete(0, "end"); mutuelle_e.insert(0, str(prefill.get("mutuelle", 0)))
-            # Set remise last — it triggers update_vente, computing Vente totale from the values above.
             remise_v.set(f"{prefill.get('remise', 0)}%")
 
 
@@ -3352,11 +3401,20 @@ class SalesPage(BasePage):
         remise_v.trace_add("write", update_vente)
 
         def on_client_change(*_a):
-            if not s and client_var.get() in client_map:  # ne préremplit que pour une nouvelle vente
+            if not s and client_var.get() in client_map:
                 cid = client_map[client_var.get()]
                 r = client_remise.get(cid, 0)
                 if r:
                     remise_v.set(f"{r}%")
+                # Auto-fill the sale date with the latest prescription date
+                conn = get_connection()
+                rx = conn.execute(
+                    "SELECT date_prescription FROM prescriptions "
+                    "WHERE client_id=? ORDER BY id DESC LIMIT 1", (cid,)
+                ).fetchone()
+                conn.close()
+                if rx and rx["date_prescription"]:
+                    date_e.set(rx["date_prescription"])
         client_var.trace_add("write", on_client_change)
 
         def save():
