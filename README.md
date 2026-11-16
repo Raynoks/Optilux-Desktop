@@ -56,6 +56,42 @@ Contient le logo (`optilux_logo.png`) et l'icône de l'application
 le logo dans la barre latérale, sur l'écran de connexion, et l'icône de la
 fenêtre / barre des tâches (sous Windows).
 
+## Version 1.0.3
+
+- **Ventes mensuelles** : la page Ventes affiche le mois en cours (menu ‹ Mois › pour revoir les mois
+  passés — rien n'est supprimé). Un crédit impayé d'un ancien mois reste visible sur le mois en cours.
+- **Crédits en rouge** : un client qui a encore un reste à payer apparaît en rouge dans les ventes.
+- **Totaux Espèces / TPE / Encaissé** : visibles uniquement par l'administrateur.
+- **Dépenses mensuelles + historique** : chaque mois repart à zéro ; les charges récurrentes sont
+  recopiées automatiquement (non payées) au premier lancement du mois. Bouton « Historique des mois »
+  pour voir le total / payé / reste de chaque mois passé.
+- **Date d'expiration** sur les articles du stock (optionnelle — lentilles, solutions…) : colonne
+  « Expiration », statut EXPIRÉ / EXPIRE BIENTÔT (30 jours), alerte sur le tableau de bord et
+  notification à la connexion.
+- **Fiche client redessinée** (saisie, consultation et historique) : une seule fenêtre large organisée
+  en cartes — Identité, Vision & mesures, Suivi, Correction, Équipement, Prix & livraison — sans
+  défilement sur un écran 1366×768 ou plus. Pastilles cliquables (VL/VP/PG, Oui/Non, jour de livraison),
+  « Reste à payer » calculé en rouge. ARX en tableau SPH / CYL / AXE (même format de stockage qu'avant) ;
+  la Remise est dans « Prix & livraison » (Prix → Remise → Après remise → Avance → Reste).
+- **Listes déroulantes intelligentes** : on peut taper ce que l'on veut, la liste se filtre pendant la
+  frappe (accents et majuscules ignorés) et, si rien ne correspond, le texte tapé est gardé tel quel.
+  Les listes qui pilotent le programme (statut, rôle, paiement, type de commande) restent limitées à
+  leurs choix. Pour un client inexistant (ventes, commandes), le programme propose de le créer.
+  La molette de la souris ne change plus la valeur d'une liste.
+- **Noms complets** (NOM Prénom) dans les ventes, les rendez-vous, le tableau de bord et les rappels.
+- **Bouton « Nouveau… »** déplacé dans la rangée de boutons de chaque page (à gauche des autres).
+- **Sécurité des données** : une copie `backups/pre-update-1.0.3.db` est créée une seule fois avant la
+  migration de la base.
+
+## Publier une mise à jour (méthode)
+
+1. Augmenter la version dans `app.py` (`APP_VERSION`) et `installer.iss` (`MyAppVersion`).
+2. Construire : `pyinstaller optilux.spec --noconfirm`, puis compiler `installer.iss` avec Inno Setup
+   (le fichier `installer\Optilux-Setup-X.Y.Z.exe` est créé).
+3. GitHub → Releases → nouvelle release avec le tag `X.Y.Z`, y joindre l'installateur.
+4. Mettre à jour `latest.json` (version, url, notes), puis `git push` sur `main`.
+   Les postes proposent la mise à jour à la prochaine connexion. Faire l'étape 3 AVANT l'étape 4.
+
 ## Derniers ajustements
 
 - **Écran de connexion** : corrigé pour le mode sombre — avant, seuls les

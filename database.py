@@ -5,6 +5,8 @@ Utilise SQLite (fichier local optilux.db) - aucune connexion internet requise.
 import sqlite3
 import os
 import sys
+import shutil
+import calendar
 import datetime
 from auth import hash_password
 
@@ -200,6 +202,15 @@ MIGRATIONS = [
 
     "ALTER TABLE prescriptions ADD COLUMN lentille_texte TEXT",
     "ALTER TABLE prescriptions ADD COLUMN lentille_check INTEGER DEFAULT 0",
+
+    "ALTER TABLE prescriptions ADD COLUMN verres_ref TEXT",
+    "ALTER TABLE prescriptions ADD COLUMN firme_ref TEXT",
+    "ALTER TABLE prescriptions ADD COLUMN monture_ref TEXT",
+    "ALTER TABLE prescriptions ADD COLUMN lentille_ref TEXT",
+
+    # v1.0.3 — date d'expiration (lentilles, produits d'entretien…) + série des charges récurrentes
+    "ALTER TABLE stock ADD COLUMN date_expiration TEXT",
+    "ALTER TABLE expenses ADD COLUMN serie_id INTEGER",
 ]
 
 DEFAULT_TYPES = {
@@ -213,8 +224,30 @@ DEFAULT_TYPES = {
 DISCOUNT_OPTIONS = [0, 5, 10, 15, 20, 30, 40, 50, 60, 70, 80, 90, 100]
 
 
+def _backup_before_update():
+    """Copie de sécurité de la base AVANT d'appliquer la mise à jour 1.0.3 (une seule fois).
+    Le fichier est volontairement hors du roulement des sauvegardes quotidiennes."""
+    try:
+        if not os.path.exists(DB_PATH):
+            return
+        probe = sqlite3.connect(DB_PATH)
+        cols = [r[1] for r in probe.execute("PRAGMA table_info(stock)")]
+        probe.close()
+        if not cols or "date_expiration" in cols:
+            return  # base neuve, ou déjà migrée
+        backup_dir = os.path.join(APP_DIR, "backups")
+        os.makedirs(backup_dir, exist_ok=True)
+        dest = os.path.join(backup_dir, "pre-update-1.0.3.db")
+        if not os.path.exists(dest):
+            shutil.copy2(DB_PATH, dest)
+    except Exception as e:
+        print(f"[backup] sauvegarde avant mise à jour impossible : {e}")
+
+
 def init_db():
     first_run = not os.path.exists(DB_PATH)
+    if not first_run:
+        _backup_before_update()
     conn = get_connection()
     conn.executescript(SCHEMA)
     conn.commit()
@@ -350,6 +383,61 @@ def _seed(conn):
                   (datetime.date.today() + datetime.timedelta(days=3)).isoformat(), "En attente"))
 
     conn.commit()
+
+
+def _parse_iso(value):
+    try:
+        return datetime.date.fromisoformat(str(value).strip()[:10])
+    except (ValueError, TypeError):
+        return None
+
+
+def _add_months(d, n):
+    y, m0 = divmod(d.year * 12 + (d.month - 1) + n, 12)
+    m = m0 + 1
+    return datetime.date(y, m, min(d.day, calendar.monthrange(y, m)[1]))
+
+
+def roll_over_recurring_expenses(today=None):
+    """Remise à zéro mensuelle des dépenses : au premier lancement de chaque mois, chaque charge
+    récurrente est recopiée dans le nouveau mois (non payée). Les lignes des mois précédents ne
+    sont jamais modifiées ni supprimées — elles forment l'historique. Retourne le nombre de lignes créées."""
+    today = today or datetime.date.today()
+    ym = today.strftime("%Y-%m")
+    if get_setting("expenses_rollover_month") == ym:
+        return 0
+    conn = get_connection()
+    rows = conn.execute("SELECT * FROM expenses WHERE recurrent=1 OR serie_id IS NOT NULL "
+                        "ORDER BY date, id").fetchall()
+    latest = {}                       # dernière ligne de chaque série
+    for r in rows:
+        latest[r["serie_id"] or r["id"]] = r
+    created = 0
+    for serie, r in latest.items():
+        if not r["recurrent"]:
+            continue                  # série arrêtée (case « récurrente » décochée)
+        old = _parse_iso(r["date"])
+        if old is None or old.strftime("%Y-%m") >= ym:
+            continue                  # déjà une ligne pour ce mois (ou futur)
+        gap = (today.year * 12 + today.month) - (old.year * 12 + old.month)
+        new_date = _add_months(old, gap).isoformat()
+        ech = _parse_iso(r["date_echeance"])
+        new_ech = _add_months(ech, gap).isoformat() if ech else None
+        if r["paye"] and (r["paye_mois"] or "") == ym:
+            # Ancienne version : l'unique ligne était déjà marquée payée pour CE mois → on la
+            # rattache simplement au mois en cours au lieu de créer un doublon non payé.
+            conn.execute("UPDATE expenses SET date=?, date_echeance=?, serie_id=? WHERE id=?",
+                         (new_date, new_ech, serie, r["id"]))
+            continue
+        conn.execute("""INSERT INTO expenses (date,libelle,categorie,montant,recurrent,personnelle,
+                         date_echeance,paye,paye_mois,serie_id) VALUES (?,?,?,?,1,?,?,0,NULL,?)""",
+                     (new_date, r["libelle"], r["categorie"], r["montant"],
+                      r["personnelle"] or 0, new_ech, serie))
+        created += 1
+    conn.commit()
+    conn.close()
+    set_setting("expenses_rollover_month", ym)
+    return created
 
 
 def log_action(user, action):
