@@ -1,6 +1,6 @@
 {
-  "version": "1.0.2",
-  "url": "https://github.com/Raynoks/Optilux-Desktop/releases/download/1.0.2/Optilux-Setup-1.0.2.exe",
-  "notes": "Nouvelles fonctionnalités d'interface et références.",
+  "version": "1.0.3",
+  "url": "https://github.com/Raynoks/Optilux-Desktop/releases/download/1.0.3/Optilux-Setup-1.0.3.exe",
+  "notes": "Ventes et dépenses repartent à zéro chaque mois (historique conservé), crédits clients en rouge, date d'expiration des produits (lentilles…), totaux de caisse réservés à l'administrateur, nouvelle fiche client sans défilement, listes déroulantes avec saisie et recherche, noms complets partout.",
   "mandatory": false
 }
