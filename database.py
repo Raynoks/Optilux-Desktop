@@ -74,7 +74,7 @@ CREATE TABLE IF NOT EXISTS stock (
     qte INTEGER DEFAULT 0,
     prix_achat REAL DEFAULT 0,
     prix_vente REAL DEFAULT 0,
-    seuil INTEGER DEFAULT 3
+    seuil INTEGER DEFAULT 2
 );
 
 CREATE TABLE IF NOT EXISTS sales (

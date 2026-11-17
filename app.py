@@ -23,7 +23,7 @@ from notifications import notify
 from whatsapp import send_whatsapp, normalize_phone
 
 
-APP_VERSION = "1.0.3"           # bump this on every release
+APP_VERSION = "1.0.4"           # bump this on every release
 UPDATE_URL = "https://raw.githubusercontent.com/Raynoks/Optilux-Desktop/main/latest.json"
 
 # Bundled assets live inside the PyInstaller extraction folder (read-only);
@@ -111,6 +111,7 @@ THEMES = {
         "table_low": "#FCE8EA",
         "table_hover": "#FBE4E7",
         "card_dark": "#0B0B0C",
+        "outline": "#CFCBC2",
     },
     "dark": {
         "content_bg": "#111113",
@@ -122,6 +123,7 @@ THEMES = {
         "table_low": "#3A1F23",
         "table_hover": "#33191C",
         "card_dark": "#242428",
+        "outline": "#46464C",
     },
 }
 CONTENT_BG = THEMES["light"]["content_bg"]
@@ -133,16 +135,18 @@ TABLE_SELECTED = THEMES["light"]["table_selected"]
 TABLE_LOW = THEMES["light"]["table_low"]
 TABLE_HOVER = THEMES["light"]["table_hover"]
 CARD_DARK = THEMES["light"]["card_dark"]
+OUTLINE = THEMES["light"]["outline"]   # contour gris doux des boutons et champs
 THEME_NAME = "light"
 
 
 def apply_theme(name):
-    global CONTENT_BG, SURFACE, BORDER, TEXT, TABLE_ODD, TABLE_SELECTED, CARD_DARK, THEME_NAME
+    global CONTENT_BG, SURFACE, BORDER, TEXT, TABLE_ODD, TABLE_SELECTED, CARD_DARK, THEME_NAME, OUTLINE
     global TABLE_LOW, TABLE_HOVER
     t = THEMES.get(name, THEMES["light"])
     CONTENT_BG, SURFACE, BORDER, TEXT = t["content_bg"], t["surface"], t["border"], t["text"]
     TABLE_ODD, TABLE_SELECTED, CARD_DARK = t["table_odd"], t["table_selected"], t["card_dark"]
     TABLE_LOW, TABLE_HOVER = t["table_low"], t["table_hover"]
+    OUTLINE = t["outline"]
     THEME_NAME = name
 
 FONT_DISPLAY = ("Georgia", 25, "bold")
@@ -154,6 +158,7 @@ FONT_MONO_SM = ("Consolas", 11)
 # Dashboard-specific fonts — easier to read than the small mono font used elsewhere.
 FONT_DASH_LABEL = ("Segoe UI", 11, "normal")
 FONT_DASH_TEXT  = ("Segoe UI", 12, "normal")
+FONT_DASH_TEXT_B = ("Segoe UI", 12, "bold")
 FONT_DASH_VALUE = ("Georgia", 22, "bold")
 
 def CATEGORIES_STOCK(): return get_types("stock_categorie")
@@ -362,7 +367,8 @@ def setup_style(root):
     except tk.TclError:
         pass
     style.configure("Treeview", background=SURFACE, fieldbackground=SURFACE, foreground=TEXT,
-                     rowheight=38, font=FONT_BODY, borderwidth=0)
+                     rowheight=38, font=FONT_BODY, borderwidth=0, bordercolor=SURFACE,
+                     lightcolor=SURFACE, darkcolor=SURFACE)
     style.configure("Treeview.Heading", background=CONTENT_BG, foreground=SLATE,
                      font=FONT_MONO_SM, borderwidth=0, relief="flat")
     style.map("Treeview.Heading", background=[("active", CONTENT_BG)])
@@ -370,9 +376,11 @@ def setup_style(root):
     style.configure("TNotebook", background=CONTENT_BG, borderwidth=0)
 
     style.configure("Themed.TCombobox", fieldbackground=SURFACE, background=SURFACE,
-                     foreground=TEXT, arrowcolor=TEXT, bordercolor=BORDER, borderwidth=1)
+                     foreground=TEXT, arrowcolor=TEXT, bordercolor=OUTLINE, lightcolor=SURFACE,
+                     darkcolor=SURFACE, borderwidth=1)
     style.map("Themed.TCombobox", fieldbackground=[("readonly", SURFACE)],
-              foreground=[("readonly", TEXT)])
+              foreground=[("readonly", TEXT)],
+              bordercolor=[("focus", RED)], lightcolor=[("focus", RED)], darkcolor=[("focus", RED)])
     # La molette ne change plus la valeur d'une liste déroulante (elle fait défiler la page).
     for _seq in ("<MouseWheel>", "<Shift-MouseWheel>", "<Button-4>", "<Button-5>"):
         root.bind_class("TCombobox", _seq, lambda e: None)
@@ -787,7 +795,7 @@ def _attach_icon(button, icon, color, size=16):
 def primary_button(parent, text, command, icon="plus"):
     b = tk.Button(parent, text=text, command=command, bg=RED, fg=WHITE,
                    font=FONT_BODY_B, relief="flat", padx=16, pady=8, cursor="hand2",
-                   borderwidth=0)
+                   borderwidth=0, highlightthickness=0)
     add_hover_animation(b, RED, RED_BRIGHT)
     _attach_icon(b, icon, WHITE)
     return b
@@ -795,8 +803,9 @@ def primary_button(parent, text, command, icon="plus"):
 
 def outline_button(parent, text, command, icon=None):
     b = tk.Button(parent, text=text, command=command, bg=SURFACE, fg=TEXT,
-                   font=FONT_BODY, relief="solid", borderwidth=1, padx=16, pady=8,
-                   cursor="hand2", highlightbackground=BORDER)
+                   font=FONT_BODY, relief="flat", borderwidth=0, padx=16, pady=8,
+                   cursor="hand2", highlightthickness=1, highlightbackground=OUTLINE,
+                   highlightcolor=OUTLINE)
     add_hover_animation(b, SURFACE, CONTENT_BG)
     _attach_icon(b, icon, TEXT)
     return b
@@ -805,7 +814,7 @@ def outline_button(parent, text, command, icon=None):
 def ghost_button(parent, text, command, fg=SLATE, icon=None):
     b = tk.Button(parent, text=text, command=command, bg=INK, fg=fg,
                    font=FONT_BODY, relief="flat", borderwidth=0, cursor="hand2", anchor="w",
-                   padx=0, pady=6)
+                   padx=0, pady=6, highlightthickness=0)
     add_hover_animation(b, INK, INK, base_fg=fg, hover_fg=WHITE)
     _attach_icon(b, icon, WHITE)
     return b
@@ -814,8 +823,9 @@ def ghost_button(parent, text, command, fg=SLATE, icon=None):
 def danger_button(parent, text, command, icon="delete"):
     """Même gabarit que outline_button, mais en rouge — pour les actions de suppression."""
     b = tk.Button(parent, text=text, command=command, bg=SURFACE, fg=RED,
-                   font=FONT_BODY_B, relief="solid", borderwidth=1,
-                   padx=16, pady=8, cursor="hand2", highlightbackground=RED)
+                   font=FONT_BODY_B, relief="flat", borderwidth=0,
+                   padx=16, pady=8, cursor="hand2", highlightthickness=1, highlightbackground=RED,
+                   highlightcolor=RED)
     add_hover_animation(b, SURFACE, RED, base_fg=RED, hover_fg=WHITE)
     _attach_icon(b, icon, RED)
     return b
@@ -824,9 +834,9 @@ def danger_button(parent, text, command, icon="delete"):
 def field(parent, label_text, initial="", show=None, width=None):
     tk.Label(parent, text=label_text.upper(), font=FONT_MONO_SM, fg=SLATE, bg=SURFACE,
               anchor="w").pack(fill="x", pady=(8, 2))
-    entry = tk.Entry(parent, font=FONT_BODY, relief="solid", borderwidth=1, show=show,
+    entry = tk.Entry(parent, font=FONT_BODY, relief="flat", borderwidth=0, show=show,
                       bg=SURFACE, fg=TEXT, insertbackground=TEXT,
-                      highlightbackground=BORDER, highlightcolor=RED, highlightthickness=1)
+                      highlightbackground=OUTLINE, highlightcolor=RED, highlightthickness=1)
     if width:
         entry.config(width=width)
     entry.insert(0, "" if initial is None else str(initial))
@@ -838,7 +848,7 @@ def password_field(parent, label_text, initial=""):
     """Password entry with a small eye button that toggles visibility."""
     tk.Label(parent, text=label_text.upper(), font=FONT_MONO_SM, fg=SLATE, bg=SURFACE,
               anchor="w").pack(fill="x", pady=(8, 2))
-    row = tk.Frame(parent, bg=SURFACE, highlightbackground=BORDER, highlightcolor=RED,
+    row = tk.Frame(parent, bg=SURFACE, highlightbackground=OUTLINE, highlightcolor=RED,
                    highlightthickness=1)
     row.pack(fill="x")
     entry = tk.Entry(row, font=FONT_BODY, relief="flat", show="•",
@@ -870,7 +880,7 @@ class HourField(tk.Frame):
     """Two spinboxes (HH : MM). Behaves like an Entry: .get() returns 'HH:MM',
     or '' if incomplete."""
     def __init__(self, parent, initial=""):
-        super().__init__(parent, bg=SURFACE, highlightbackground=BORDER, highlightcolor=RED,
+        super().__init__(parent, bg=SURFACE, highlightbackground=OUTLINE, highlightcolor=RED,
                          highlightthickness=1)
         h = m = None
         if initial:
@@ -938,7 +948,7 @@ class DateField(tk.Frame):
     'YYYY-MM-DD', or '' if incomplete. The '×' clears all three — used for
     optional échéance / prévue fields."""
     def __init__(self, parent, initial=""):
-        super().__init__(parent, bg=SURFACE, highlightbackground=BORDER, highlightcolor=RED,
+        super().__init__(parent, bg=SURFACE, highlightbackground=OUTLINE, highlightcolor=RED,
                          highlightthickness=1)
         d = m = y = None
         if initial:
@@ -1023,12 +1033,13 @@ class SmartCombobox(ttk.Combobox):
                "Caps_Lock", "Prior", "Next", "Meta_L", "Meta_R", "Super_L", "Super_R"}
     _open_instance = None
 
-    def __init__(self, parent, values=(), strict=False, max_rows=8, **kw):
+    def __init__(self, parent, values=(), strict=False, max_rows=8, item_font=None, **kw):
         kw.pop("state", None)
         kw.setdefault("style", "Themed.TCombobox")
         super().__init__(parent, values=list(values), **kw)
         self._strict = strict
         self._max_rows = max_rows
+        self._item_font = item_font
         self._popup = self._lb = self._sb = None
         self._shown = False
         self._items = []
@@ -1084,10 +1095,10 @@ class SmartCombobox(ttk.Combobox):
     def _ensure_popup(self):
         if self._popup is not None:
             return
-        self._popup = tk.Frame(self.winfo_toplevel(), bg=BORDER)
+        self._popup = tk.Frame(self.winfo_toplevel(), bg=OUTLINE)
         inner = tk.Frame(self._popup, bg=SURFACE)
         inner.pack(fill="both", expand=True, padx=1, pady=1)
-        self._lb = tk.Listbox(inner, font=FONT_BODY, bg=SURFACE, fg=TEXT, selectbackground=RED,
+        self._lb = tk.Listbox(inner, font=self._item_font or FONT_BODY, bg=SURFACE, fg=TEXT, selectbackground=RED,
                               selectforeground=WHITE, activestyle="none", relief="flat", borderwidth=0,
                               highlightthickness=0, exportselection=False, takefocus=0, width=1)
         self._sb = ttk.Scrollbar(inner, orient="vertical", command=self._lb.yview,
@@ -1455,8 +1466,9 @@ def oui_non(parent, label_text, initial_oui=False):
 
 
 def mini_entry(parent, row, col, initial=""):
-    e = tk.Entry(parent, font=FONT_MONO_SM, width=7, relief="solid", borderwidth=1,
-                 bg=SURFACE, fg=TEXT, insertbackground=TEXT, justify="center")
+    e = tk.Entry(parent, font=FONT_MONO_SM, width=7, relief="flat", borderwidth=0,
+                 bg=SURFACE, fg=TEXT, insertbackground=TEXT, justify="center",
+                 highlightthickness=1, highlightbackground=OUTLINE, highlightcolor=RED)
     e.insert(0, initial or "")
     e.grid(row=row, column=col, padx=2, pady=2, sticky="ew")
     return e
@@ -1497,7 +1509,7 @@ def fiche_entry(parent, initial="", width=1, justify="left", font=None):
     e = tk.Entry(parent, font=font or FONT_BODY, width=width, justify=justify, relief="flat",
                  borderwidth=0, bg=SURFACE, fg=TEXT, insertbackground=TEXT,
                  disabledbackground=CONTENT_BG, readonlybackground=CONTENT_BG,
-                 highlightthickness=1, highlightbackground=BORDER, highlightcolor=RED)
+                 highlightthickness=1, highlightbackground=OUTLINE, highlightcolor=RED)
     e.insert(0, "" if initial is None else str(initial))
     return e
 
@@ -1520,7 +1532,7 @@ def fiche_labeled(parent, col, text, make, padx=(0, 10), weight=0, ipady=3):
 def toggle_chip(parent, text, var, width=5):
     """Pastille à cocher (choix multiple), ex. VL / VP / PG."""
     lbl = tk.Label(parent, text=text, font=FONT_CHIP, width=width, pady=5, cursor="hand2", takefocus=1,
-                   highlightthickness=1, highlightbackground=BORDER, highlightcolor=RED)
+                   highlightthickness=1, highlightbackground=OUTLINE, highlightcolor=RED)
 
     def refresh(*_a):
         on = bool(var.get())
@@ -1552,7 +1564,7 @@ def single_choice_chips(parent, var, choices, width=5, allow_clear=False, colors
 
     for val, text in choices:
         lbl = tk.Label(frame, text=text, font=FONT_CHIP, width=width, pady=5, cursor="hand2", takefocus=1,
-                       highlightthickness=1, highlightbackground=BORDER, highlightcolor=RED)
+                       highlightthickness=1, highlightbackground=OUTLINE, highlightcolor=RED)
         lbl.pack(side="left", padx=(0, 4))
         lbl.bind("<Button-1>", lambda _e, v=val: click(v))
         lbl.bind("<space>", lambda _e, v=val: click(v))
@@ -1578,7 +1590,7 @@ def render_fiche_view(parent, c, rx, show_identity=True, show_name=False):
         kw = {"width": width} if width else {}
         return tk.Label(p, text="—" if empty else str(text), font=font or (FONT_BODY_B if bold else FONT_BODY),
                         bg=SURFACE, fg=SLATE if empty else TEXT, highlightthickness=1,
-                        highlightbackground=BORDER, anchor="center" if center else "w", padx=8, pady=3, **kw)
+                        highlightbackground=OUTLINE, anchor="center" if center else "w", padx=8, pady=3, **kw)
 
     def row(p):
         r = tk.Frame(p, bg=CONTENT_BG)
@@ -1630,7 +1642,7 @@ def render_fiche_view(parent, c, rx, show_identity=True, show_name=False):
     for lbl, key in (("VL", "vl"), ("VP", "vp"), ("PG", "pg")):
         on = bool(g(key, 0))
         tk.Label(r, text=lbl, font=FONT_CHIP, width=5, pady=5, bg=RED if on else SURFACE,
-                 fg=WHITE if on else SLATE, highlightthickness=1, highlightbackground=BORDER
+                 fg=WHITE if on else SLATE, highlightthickness=1, highlightbackground=OUTLINE
                  ).pack(side="left", padx=(0, 6))
     ax = tk.Frame(vis, bg=CONTENT_BG)
     ax.pack(fill="x", pady=2)
@@ -1742,7 +1754,7 @@ def render_fiche_view(parent, c, rx, show_identity=True, show_name=False):
     for j in JOURS_SEMAINE:
         on = (chosen == j)
         tk.Label(days, text=j, font=FONT_CHIP, width=4, pady=4, bg=RED if on else SURFACE,
-                 fg=WHITE if on else SLATE, highlightthickness=1, highlightbackground=BORDER
+                 fg=WHITE if on else SLATE, highlightthickness=1, highlightbackground=OUTLINE
                  ).pack(side="left", padx=(0, 4))
 
 
@@ -2355,7 +2367,7 @@ class MainFrame(tk.Frame):
             if admin_only and not app.is_admin():
                 continue
             b = tk.Button(sidebar, text=" " + label.upper(), font=FONT_MONO_SM, bg=INK, fg=SLATE,
-                          bd=0, anchor="w", padx=24, pady=10, cursor="hand2",
+                          bd=0, anchor="w", padx=24, pady=10, cursor="hand2", highlightthickness=0,
                           command=lambda k=key: self.show_page(k))
             icon = get_icon(icon_name, WHITE, size=15)
             if icon:
@@ -2382,7 +2394,7 @@ class MainFrame(tk.Frame):
         # ---------------- content area ----------------
         content_wrap = tk.Frame(self, bg=CONTENT_BG)
         content_wrap.pack(side="left", fill="both", expand=True)
-        self.content = tk.Frame(content_wrap, bg=CONTENT_BG, padx=30, pady=26)
+        self.content = tk.Frame(content_wrap, bg=CONTENT_BG, padx=26, pady=14)
         self.content.pack(fill="both", expand=True)
 
         self.pages = {}
@@ -2560,15 +2572,18 @@ class BasePage(tk.Frame):
 
     def header(self, kicker, title, button_text=None, button_cmd=None):
         row = tk.Frame(self, bg=CONTENT_BG)
-        row.pack(fill="x", pady=(0, 16))
+        row.pack(fill="x", pady=(0, 8))
         left = tk.Frame(row, bg=CONTENT_BG)
-        left.pack(side="left")
+        left.pack(side="left", anchor="s")
+        # Zone en haut à droite, sur la ligne du titre : filtres, mois, bascules… (remplie par chaque page)
+        self.header_right = tk.Frame(row, bg=CONTENT_BG)
+        self.header_right.pack(side="right", anchor="s")
         tk.Label(left, text=kicker.upper(), font=FONT_MONO_SM, fg=RED, bg=CONTENT_BG).pack(anchor="w")
         tk.Label(left, text=title, font=FONT_DISPLAY, fg=TEXT, bg=CONTENT_BG).pack(anchor="w")
         # Le bouton principal « Créer » n'est plus en haut à droite : il est dans la rangée de boutons
         # de la page (voir add_create_button).
         self._create_action = (button_text.lstrip("+").strip(), button_cmd) if button_text else None
-        tk.Frame(self, bg=BORDER, height=1).pack(fill="x", pady=(0, 16))
+        tk.Frame(self, bg=BORDER, height=1).pack(fill="x", pady=(0, 8))
 
     def add_create_button(self, parent):
         """Bouton principal (Nouveau…) placé à gauche des autres boutons de la page."""
@@ -2577,8 +2592,8 @@ class BasePage(tk.Frame):
             primary_button(parent, action[0], action[1], icon="plus").pack(side="left", padx=(0, 8))
 
     def make_search_box(self, placeholder="Rechercher…"):
-        wrap = tk.Frame(self, bg=SURFACE, highlightbackground=BORDER, highlightthickness=1)
-        wrap.pack(fill="x", pady=(0, 12))
+        wrap = tk.Frame(self, bg=SURFACE, highlightbackground=OUTLINE, highlightthickness=1)
+        wrap.pack(fill="x", pady=(0, 8))
         icon = get_icon("search", SLATE, 15)
         icon_lbl = tk.Label(wrap, bg=SURFACE)
         if icon:
@@ -2588,7 +2603,7 @@ class BasePage(tk.Frame):
         var = tk.StringVar()
         var.trace_add("write", lambda *a: self.refresh())
         entry = tk.Entry(wrap, textvariable=var, font=FONT_BODY, relief="flat",
-                          bg=SURFACE, fg=TEXT, insertbackground=TEXT)
+                          bg=SURFACE, fg=TEXT, insertbackground=TEXT, highlightthickness=0)
         entry.pack(fill="x", ipady=6, padx=6, side="left", expand=True)
         return var
 
@@ -2603,8 +2618,9 @@ class BasePage(tk.Frame):
         """A two-state toggle button (e.g. 'Charges' vs 'Personnelles'). Uses a dynamic
         rest-color hover (reads b._rest_bg live) instead of a hover baked in at creation
         time, since the active/inactive color is switched after the fact by the caller."""
-        b = tk.Button(parent, text=text, command=command, font=FONT_BODY_B, relief="solid",
-                      borderwidth=1, padx=16, pady=8, cursor="hand2")
+        b = tk.Button(parent, text=text, command=command, font=FONT_BODY_B, relief="flat",
+                      borderwidth=0, padx=16, pady=8, cursor="hand2", highlightthickness=1,
+                      highlightbackground=OUTLINE, highlightcolor=OUTLINE)
         b._rest_bg, b._rest_fg = SURFACE, TEXT
 
         def on_enter(_e):
@@ -2623,7 +2639,8 @@ class BasePage(tk.Frame):
         button._rest_bg = RED if active else SURFACE
         button._rest_fg = WHITE if active else TEXT
         button.configure(bg=button._rest_bg, fg=button._rest_fg,
-                          highlightbackground=RED if active else BORDER)
+                          highlightbackground=RED if active else OUTLINE,
+                          highlightcolor=RED if active else OUTLINE)
 
     def show_detail_modal(self, title, build_content_fn, on_edit, on_history=None, width=480, height=None):
         """Fenêtre de consultation en lecture seule : affiche les infos proprement,
@@ -2681,7 +2698,7 @@ class BasePage(tk.Frame):
         tk.Label(card, text=value, font=FONT_DISPLAY_SM, bg=bg, fg=WHITE).pack(anchor="w", pady=(4, 0))
 
     def make_table(self, columns, height=14):
-        wrap = tk.Frame(self, bg=SURFACE, highlightbackground=BORDER, highlightthickness=1)
+        wrap = tk.Frame(self, bg=SURFACE, highlightbackground=OUTLINE, highlightthickness=1)
         wrap.pack(fill="both", expand=True)
         tree = ttk.Treeview(wrap, columns=columns, show="headings", height=height)
         for c in columns:
@@ -2934,7 +2951,7 @@ class DashboardPage(BasePage):
         # Operational cards — visible to everyone (employee + admin)
         card_specs.append(("Rendez-vous aujourd'hui", "calendar", lambda card: self._build_list(
             card, today_appts, "Aucun rendez-vous aujourd'hui.",
-            lambda a: (f"{a['heure']} — {resolve_name(a['client_nom'])}", a["statut"], SLATE))))
+            lambda a: (f"{a['heure']} — {resolve_name(a['client_nom'])}", a["statut"], SLATE), bold=True)))
         card_specs.append(("Alertes stock", "warning", lambda card: self._build_list(
             card, low_stock, "Tout le stock est suffisant.", self._stock_alert_row)))
         card_specs.append(("Commandes à suivre", "package", lambda card: self._build_list(
@@ -2943,7 +2960,7 @@ class DashboardPage(BasePage):
                 ((c["fournisseur"] if (c["type"] or "client") == "fournisseur"
                     else f"{c['client_nom'] or ''} {c['client_prenom'] or ''}".strip()) or "—")
                     + (f" — {c['description']}" if c["description"] else ""),
-                "EN RETARD" if CommandesPage.alert_state(c) == "overdue" else "BIENTÔT", RED))))
+                "EN RETARD" if CommandesPage.alert_state(c) == "overdue" else "BIENTÔT", RED), bold=True)))
 
         # Admin-only cards that come after the operational ones
         if self.app.is_admin():
@@ -3023,7 +3040,7 @@ class DashboardPage(BasePage):
         tk.Label(card, text="Total des ventes (Crédit inclue)", font=FONT_DASH_TEXT, bg=SURFACE, fg=SLATE).pack(anchor="w", pady=(0, 10))
         tk.Label(card, text=money(ca), font=FONT_DASH_VALUE, bg=SURFACE, fg=RED).pack(anchor="w")
 
-    def _build_list(self, card, rows, empty_text, row_fn):
+    def _build_list(self, card, rows, empty_text, row_fn, bold=False):
         if not rows:
             tk.Label(card, text=empty_text, font=FONT_DASH_TEXT, bg=SURFACE, fg=SLATE).pack(anchor="w")
             return
@@ -3032,11 +3049,12 @@ class DashboardPage(BasePage):
             r = tk.Frame(card, bg=SURFACE)
             r.pack(fill="x", pady=4)
             if len(label_txt) > 26:
-                tk.Label(r, text=label_txt, font=FONT_DASH_TEXT, bg=SURFACE, fg=TEXT, anchor="w",
+                tk.Label(r, text=label_txt, font=FONT_DASH_TEXT_B if bold else FONT_DASH_TEXT, bg=SURFACE, fg=TEXT, anchor="w",
                           wraplength=420, justify="left").pack(fill="x")
                 tk.Label(r, text=status_txt, font=FONT_DASH_LABEL, bg=SURFACE, fg=status_color, anchor="w").pack(fill="x")
             else:
-                tk.Label(r, text=label_txt, font=FONT_DASH_TEXT, bg=SURFACE, fg=TEXT).pack(side="left")
+                tk.Label(r, text=label_txt, font=FONT_DASH_TEXT_B if bold else FONT_DASH_TEXT, bg=SURFACE,
+                         fg=TEXT).pack(side="left")
                 tk.Label(r, text=status_txt, font=FONT_DASH_LABEL, bg=SURFACE, fg=status_color).pack(side="right")
     def export_calendar(self):
         conn = get_connection()
@@ -3141,7 +3159,7 @@ class ClientsPage(BasePage):
         self.search_var = self.make_search_box("Rechercher un client…")
 
         btns = tk.Frame(self, bg=CONTENT_BG)
-        btns.pack(fill="x", pady=(8, 12))
+        btns.pack(fill="x", pady=(0, 8))
         self.add_create_button(btns)
         outline_button(btns, "Voir la fiche", lambda: self.open_detail(self._selected_id()), icon="search").pack(side="left")
         danger_button(btns, "Supprimer", self.delete_selected).pack(side="left", padx=(8, 12))
@@ -3308,8 +3326,8 @@ class ClientsPage(BasePage):
         ident.pack(fill="x", pady=(0, 8))
         g1 = tk.Frame(ident, bg=CARD)
         g1.pack(fill="x")
-        nom_e = fiche_labeled(g1, 0, "Nom", lambda p: fiche_entry(p, c["nom"] if c else ""), weight=3)
-        prenom_e = fiche_labeled(g1, 1, "Prénom", lambda p: fiche_entry(p, c["prenom"] if c else ""), weight=3)
+        nom_e = fiche_labeled(g1, 0, "Nom", lambda p: fiche_entry(p, c["nom"] if c else "", font=FONT_BODY_B), weight=3)
+        prenom_e = fiche_labeled(g1, 1, "Prénom", lambda p: fiche_entry(p, c["prenom"] if c else "", font=FONT_BODY_B), weight=3)
         naiss_e = fiche_labeled(g1, 2, "Né(e) le", lambda p: DateField(p, c["date_naissance"] if c else ""), ipady=0)
         ville_e = fiche_labeled(g1, 3, "Ville", lambda p: fiche_entry(p, c["ville"] if c else ""), weight=2)
         num_e = fiche_labeled(g1, 4, "Téléphone", lambda p: fiche_entry(p, c["tel"] if c else ""), weight=2,
@@ -3443,7 +3461,8 @@ class ClientsPage(BasePage):
         prix_e = fiche_labeled(g2, 1, "Prix", lambda p: fiche_entry(p, rxg("prix"), justify="right"), weight=1)
         fiche_labeled(g2, 2, "Remise", lambda p: SmartCombobox(
             p, textvariable=remise_v, values=remise_options, width=5, font=FONT_BODY), weight=1, ipady=3)
-        prix_remise_e = fiche_labeled(g2, 3, "Après remise", lambda p: fiche_entry(p, "", justify="right"), weight=1)
+        prix_remise_e = fiche_labeled(g2, 3, "Après remise", lambda p: fiche_entry(
+            p, "", justify="right", font=FONT_BODY_B), weight=1)
         avance_e = fiche_labeled(g2, 4, "Avance", lambda p: fiche_entry(p, rxg("avance"), justify="right"), weight=1)
         r_e = fiche_labeled(g2, 5, "Reste", lambda p: fiche_entry(
             p, rxg("r_texte"), justify="right", font=FONT_BODY_B), weight=1)
@@ -3454,7 +3473,8 @@ class ClientsPage(BasePage):
                             ).grid(row=1, column=6, sticky="w", pady=(2, 0))
         for _col in (1, 2, 3, 4, 5):
             g2.grid_columnconfigure(_col, weight=1, uniform="pay")  # 4 montants de même largeur
-        prix_remise_e.configure(state="readonly", fg=TEXT)
+        apres_var = tk.StringVar()                 # total après remise : modifiable à la main
+        prix_remise_e.configure(textvariable=apres_var)
         r_e.configure(state="readonly", fg=TEXT)
 
         def _parse_amount(raw):
@@ -3473,19 +3493,54 @@ class ClientsPage(BasePage):
             entry.insert(0, text)
             entry.configure(state="readonly", fg=color or TEXT)
 
-        def _recalc_all(*_a):
-            prix_v = _parse_amount(prix_e.get())
-            avance_v = _parse_amount(avance_e.get())
-            remise_pct = _read_remise()
-            prix_apres_remise = prix_v * (1 - remise_pct / 100)
-            reste = prix_apres_remise - avance_v
-            _set_readonly(prix_remise_e, f"{prix_apres_remise:.0f}")
-            _set_readonly(r_e, f"{reste:.0f}", RED if reste > 0.5 else OK_GREEN)  # rouge = reste dû
+        state_apres = {"manual": False, "busy": False}
 
-        prix_e.bind("<KeyRelease>", _recalc_all)
-        avance_e.bind("<KeyRelease>", _recalc_all)
-        remise_v.trace_add("write", _recalc_all)
+        def _fmt(v):
+            return f"{v:.0f}" if abs(v - round(v)) < 0.005 else f"{v:.2f}"
+
+        def _recalc_all(*_a):
+            """(Re)calcule « Après remise » = Prix − remise, puis le reste."""
+            state_apres["busy"] = True
+            apres_var.set(_fmt(_parse_amount(prix_e.get()) * (1 - _read_remise() / 100)))
+            state_apres["busy"] = False
+            _update_reste()
+
+        def _update_reste(*_a):
+            """Reste = Après remise − Avance, avec ce qui est écrit dans Après remise (calculé ou saisi)."""
+            reste = _parse_amount(apres_var.get()) - _parse_amount(avance_e.get())
+            _set_readonly(r_e, _fmt(reste), RED if reste > 0.5 else OK_GREEN)  # rouge = reste dû
+
+        def _on_prix_or_remise(*_a):
+            state_apres["manual"] = False      # le prix ou la remise changent → on repart du calcul automatique
+            _recalc_all()
+
+        def _on_apres_typed(*_a):
+            if state_apres["busy"]:
+                return
+            state_apres["manual"] = True       # total saisi à la main : tous les calculs suivent ce total
+            _update_reste()
+
+        def _on_apres_leave(_e=None):
+            if not apres_var.get().strip():    # champ vidé → retour au calcul automatique
+                state_apres["manual"] = False
+                _recalc_all()
+
+        prix_e.bind("<KeyRelease>", _on_prix_or_remise)
+        avance_e.bind("<KeyRelease>", _update_reste)
+        remise_v.trace_add("write", _on_prix_or_remise)
+        apres_var.trace_add("write", _on_apres_typed)
+        prix_remise_e.bind("<FocusOut>", _on_apres_leave)
         _recalc_all()
+        # Fiche existante : si le total enregistré (reste + avance) diffère du calcul, on le conserve
+        _stored_reste, _stored_av = rxg("r_texte", None), rxg("avance", None)
+        if _stored_reste not in (None, "") and _stored_av not in (None, ""):
+            _tot = _parse_amount(_stored_reste) + _parse_amount(_stored_av)
+            if abs(_tot - _parse_amount(apres_var.get())) > 0.5:
+                state_apres["manual"] = True
+                state_apres["busy"] = True
+                apres_var.set(_fmt(_tot))
+                state_apres["busy"] = False
+                _update_reste()
 
         fit_modal(modal, 1100, 740)
         modal.enable_autohide_scrollbar()
@@ -3563,7 +3618,11 @@ class ClientsPage(BasePage):
             cid, nom = result
             prix_val = _parse_amount(prix_e.get())
             avance_val = _parse_amount(avance_e.get())
-            remise_val = int(remise_v.get().replace("%", "") or 0)
+            _rv = parse_remise(remise_v.get())
+            remise_val = int(round(_rv or 0))
+            apres_val = _parse_amount(apres_var.get())
+            if abs(apres_val - prix_val * (1 - remise_val / 100)) > 0.5:
+                prix_val, remise_val = apres_val, 0     # total saisi à la main : la vente reprend ce total
             full_name = f"{nom} {prenom_e.get().strip()}".strip()
 
             modal.destroy()
@@ -3597,7 +3656,7 @@ class AppointmentsPage(BasePage):
         self.search_var = self.make_search_box("Rechercher un rendez-vous…")
 
         btns = tk.Frame(self, bg=CONTENT_BG)
-        btns.pack(fill="x", pady=(8, 12))
+        btns.pack(fill="x", pady=(0, 8))
         self.add_create_button(btns)
         outline_button(btns, "Modifier la sélection", lambda: self.open_form(self._selected_id()), icon="edit").pack(side="left")
         danger_button(btns, "Supprimer", self.delete_selected).pack(side="left", padx=(8, 12))
@@ -3685,7 +3744,7 @@ class AppointmentsPage(BasePage):
         body = modal.body
         tk.Label(body, text="CLIENT", font=FONT_MONO_SM, fg=SLATE, bg=SURFACE, anchor="w").pack(fill="x", pady=(8, 2))
         client_var = tk.StringVar(value=resolve_name(a["client_nom"]) if a else "")
-        cb = SmartCombobox(body, textvariable=client_var, values=client_names, font=FONT_BODY)
+        cb = SmartCombobox(body, textvariable=client_var, values=client_names, font=FONT_BODY_B, item_font=FONT_BODY_B)
         cb.pack(fill="x", ipady=2)
 
         date_e = field_date(body, "Date (AAAA-MM-JJ)", a["date"] if a else today_iso())
@@ -3724,7 +3783,7 @@ class StockPage(BasePage):
         self.search_var = self.make_search_box("Rechercher un article…")
 
         btns = tk.Frame(self, bg=CONTENT_BG)
-        btns.pack(fill="x", pady=(8, 12))
+        btns.pack(fill="x", pady=(0, 8))
         self.add_create_button(btns)
         outline_button(btns, "Voir la fiche", lambda: self.open_detail(self._selected_id()), icon="search").pack(side="left")
         danger_button(btns, "Supprimer", self.delete_selected).pack(side="left", padx=(8, 12))
@@ -3812,7 +3871,8 @@ class StockPage(BasePage):
                 img_lbl._icon_ref = photo_ref
             else:
                 img_lbl.configure(text="Aucune photo", fg=SLATE, font=FONT_MONO_SM, width=26, height=10,
-                                    relief="solid", borderwidth=1, bg=SURFACE)
+                                    relief="flat", borderwidth=0, highlightthickness=1,
+                                    highlightbackground=OUTLINE, bg=SURFACE)
             img_lbl.pack(anchor="center", pady=(0, 4))
 
             flags = self.status_flags(s)
@@ -3853,7 +3913,7 @@ class StockPage(BasePage):
         row2 = tk.Frame(body, bg=SURFACE); row2.pack(fill="x")
         achat_e = field(row2, "Prix achat", str(s["prix_achat"]) if s else "0")
         vente_e = field(row2, "Prix vente", str(s["prix_vente"]) if s else "0")
-        seuil_e = field(body, "Seuil d'alerte", str(s["seuil"]) if s else "3")
+        seuil_e = field(body, "Seuil d'alerte", str(s["seuil"]) if s else "2")
         exp_e = field_date(body, "Date d'expiration (optionnel — lentilles, solutions…)",
                            s["date_expiration"] if s and s["date_expiration"] else "")
 
@@ -3878,7 +3938,8 @@ class StockPage(BasePage):
         tk.Label(body, text="PHOTO", font=FONT_MONO_SM, fg=SLATE, bg=SURFACE, anchor="w").pack(fill="x", pady=(10, 2))
         photo_row = tk.Frame(body, bg=SURFACE); photo_row.pack(fill="x")
         preview_lbl = tk.Label(photo_row, bg=SURFACE, text="Aucune image", fg=SLATE, font=FONT_MONO_SM,
-                                width=12, height=6, relief="solid", borderwidth=1)
+                                width=12, height=6, relief="flat", borderwidth=0,
+                                highlightthickness=1, highlightbackground=OUTLINE)
         preview_lbl.pack(side="left")
         state = {"image_path": s["image_path"] if s else None, "preview_ref": None}
 
@@ -3977,17 +4038,15 @@ class SalesPage(BasePage):
         super().__init__(parent, app)
         self.header("Registre", "Ventes", "+ Nouvelle vente", self.open_form)
 
-        period_row = tk.Frame(self, bg=CONTENT_BG)
-        period_row.pack(fill="x", pady=(0, 10))
-        self.month_picker = MonthPicker(period_row, self.refresh, self._months)
-        self.month_picker.pack(side="left")
-        tk.Label(period_row, text="En rouge : client avec un crédit en cours", font=FONT_MONO_SM,
-                  bg=CONTENT_BG, fg=RED).pack(side="right")
+        self.month_picker = MonthPicker(self.header_right, self.refresh, self._months)
+        self.month_picker.pack(side="right")
+        tk.Label(self.header_right, text="Rouge = crédit en cours", font=FONT_MONO_SM,
+                  bg=CONTENT_BG, fg=RED).pack(side="right", padx=(0, 14))
 
         self.search_var = self.make_search_box("Rechercher une vente (client, paiement)…")
 
         btns = tk.Frame(self, bg=CONTENT_BG)
-        btns.pack(fill="x", pady=(8, 12))
+        btns.pack(fill="x", pady=(0, 8))
         self.add_create_button(btns)
         outline_button(btns, "Modifier la sélection", lambda: self.open_form(self._selected_id()), icon="edit").pack(side="left")
         danger_button(btns, "Supprimer", self.delete_selected).pack(side="left", padx=(8, 12))
@@ -3997,10 +4056,17 @@ class SalesPage(BasePage):
         # Totaux Espèces / TPE / Encaissé : réservés à l'administrateur
         self.totals_row = tk.Frame(self, bg=CONTENT_BG)
         if self.app.is_admin():
-            self.totals_row.pack(fill="x", pady=(0, 10))
+            self.totals_row.pack(fill="x", pady=(0, 8))
 
         self.tree = self.make_table(["Date", "Client", "Vente", "Avance", "Reste", "Remise", "Paiement"])
         self.tree.tag_configure("credit", background=TABLE_LOW, foreground=RED)
+        # Client : large colonne, nom aligné à gauche ; Remise : juste de quoi afficher « 100% »
+        for _col, _w, _stretch in (("Date", 100, True), ("Client", 300, True), ("Vente", 100, True),
+                                    ("Avance", 100, True), ("Reste", 100, True), ("Remise", 84, False),
+                                    ("Paiement", 110, True)):
+            self.tree.column(_col, width=_w, minwidth=min(_w, 84), stretch=_stretch)
+        self.tree.column("Client", anchor="w")
+        self.tree.heading("Client", anchor="w")
         self.tree.bind("<Double-1>", lambda e: self.open_form(self._selected_id()))
         
 
@@ -4039,7 +4105,7 @@ class SalesPage(BasePage):
         # Clients qui ont encore un crédit (reste > 0), tous mois confondus
         in_credit = {owner(s) for s in rows if reste_of(s) > 0.005}
 
-        total_tpe, total_especes, n = 0.0, 0.0, 0
+        total_tpe, total_especes, credit_total, n = 0.0, 0.0, 0.0, 0
         for s in rows:
             in_month = (s["date"] or "")[:7] == ym
             # Le mois en cours repart à zéro, mais un crédit impayé d'un ancien mois reste visible
@@ -4055,6 +4121,8 @@ class SalesPage(BasePage):
                                       money(reste_of(s)), f"{s['remise']}%" if s["remise"] else "—",
                                       s["paiement"] or "Espèces"))
             n += 1
+            if reste_of(s) > 0.005:
+                credit_total += reste_of(s)   # crédit à recevoir : mois affiché + impayés reportés
             if in_month:  # les totaux ne comptent que le mois affiché
                 if s["paiement"] == "TPE":
                     total_tpe += s["avance"] or 0
@@ -4065,6 +4133,7 @@ class SalesPage(BasePage):
             self._total_card("Total Espèces", money(total_especes), "sales")
             self._total_card("Total TPE", money(total_tpe), "wallet")
             self._total_card("Total encaissé", money(total_tpe + total_especes), "growth", accent=True)
+            self._total_card("Total crédit", money(credit_total), "clock")
 
     def _total_card(self, label, value, icon, accent=False):
         self.stat_card(self.totals_row, label, value, icon, accent)
@@ -4101,7 +4170,8 @@ class SalesPage(BasePage):
         body = modal.body
         tk.Label(body, text="CLIENT", font=FONT_MONO_SM, fg=SLATE, bg=SURFACE, anchor="w").pack(fill="x", pady=(8, 2))
         client_var = tk.StringVar(value=current_name)
-        cb = SmartCombobox(body, textvariable=client_var, values=list(client_map.keys()), font=FONT_BODY)
+        cb = SmartCombobox(body, textvariable=client_var, values=list(client_map.keys()), font=FONT_BODY_B,
+                            item_font=FONT_BODY_B)
         cb.pack(fill="x", ipady=2)
 
         date_e = field_date(body, "Date", s["date"] if s else today_iso())
@@ -4851,29 +4921,29 @@ class ExpensesPage(BasePage):
         self.show_personal = False
         self.header("Charges", "Dépenses", "+ Nouvelle dépense", self.open_form)
 
-        toggle_row = tk.Frame(self, bg=CONTENT_BG)
-        toggle_row.pack(fill="x", pady=(0, 10))
+        toggle_row = tk.Frame(self.header_right, bg=CONTENT_BG)
+        toggle_row.pack(anchor="e")
         self.btn_business = self.mode_button(toggle_row, "Charges (entreprise)", lambda: self.set_mode(False))
         self.btn_business.pack(side="left", padx=(0, 8))
         self.btn_personal = self.mode_button(toggle_row, "Dépenses personnelles", lambda: self.set_mode(True))
         self.btn_personal.pack(side="left")
 
-        period_row = tk.Frame(self, bg=CONTENT_BG)
-        period_row.pack(fill="x", pady=(0, 10))
+        period_row = tk.Frame(self.header_right, bg=CONTENT_BG)
+        period_row.pack(anchor="e", pady=(6, 0))
         self.month_picker = MonthPicker(period_row, self.refresh, self._months)
         self.month_picker.pack(side="left")
-        outline_button(period_row, "Historique des mois", self.open_history, icon="clock").pack(side="right")
 
         self.search_var = self.make_search_box("Rechercher une dépense…")
 
         btns = tk.Frame(self, bg=CONTENT_BG)
-        btns.pack(fill="x", pady=(8, 12))
+        btns.pack(fill="x", pady=(0, 8))
         self.add_create_button(btns)
         outline_button(btns, "Modifier la sélection", lambda: self.open_form(self._selected_id()), icon="edit").pack(side="left")
         danger_button(btns, "Supprimer", self.delete_selected).pack(side="left", padx=(8, 12))
+        outline_button(btns, "Historique des mois", self.open_history, icon="clock").pack(side="right")
 
         self.totals_row = tk.Frame(self, bg=CONTENT_BG)
-        self.totals_row.pack(fill="x", pady=(0, 10))
+        self.totals_row.pack(fill="x", pady=(0, 8))
         self._update_toggle_style()
         self.tree = self.make_table(["Date", "Libellé", "Catégorie", "Montant", "Échéance", "Récurrent", "Payé"])
         self.tree.tag_configure("paid", background="#E8F5EC", foreground="#2E7D46")
@@ -5092,13 +5162,13 @@ class UsersPage(BasePage):
     def __init__(self, parent, app):
         super().__init__(parent, app)
         self.header("Accès", "Utilisateurs", "+ Nouvel utilisateur", self.open_form)
-        self.tree = self.make_table(["Identifiant", "Nom", "Rôle"], height=6)
-        self.tree.bind("<Double-1>", lambda e: self.open_form(self._selected_id()))
         btns = tk.Frame(self, bg=CONTENT_BG)
-        btns.pack(fill="x", pady=(8, 14))
+        btns.pack(fill="x", pady=(0, 8))
         self.add_create_button(btns)
         outline_button(btns, "Modifier la sélection", lambda: self.open_form(self._selected_id()), icon="edit").pack(side="left")
         danger_button(btns, "Supprimer", self.delete_selected).pack(side="left", padx=(8, 12))
+        self.tree = self.make_table(["Identifiant", "Nom", "Rôle"], height=6)
+        self.tree.bind("<Double-1>", lambda e: self.open_form(self._selected_id()))
 
         tk.Label(self, text="Journal d'activité", font=FONT_DISPLAY_SM, bg=CONTENT_BG, fg=TEXT).pack(anchor="w", pady=(6, 8))
         self.audit_search_var = self.make_search_box("Rechercher dans le journal (utilisateur, action)…")
@@ -5213,8 +5283,8 @@ class FacturesPage(BasePage):
         self.show_type = "client"
         self.header("Documents", "Factures", "+ Ajouter manuellement", self.open_form)
 
-        toggle_row = tk.Frame(self, bg=CONTENT_BG)
-        toggle_row.pack(fill="x", pady=(8, 12))
+        toggle_row = tk.Frame(self.header_right, bg=CONTENT_BG)
+        toggle_row.pack()
         self.btn_client = self.mode_button(toggle_row, "Factures clients", lambda: self.set_type("client"))
         self.btn_client.pack(side="left", padx=(0, 12))
         self.btn_entreprise = self.mode_button(toggle_row, "Factures de l'entreprise",
@@ -5224,7 +5294,7 @@ class FacturesPage(BasePage):
         self.search_var = self.make_search_box("Rechercher une facture…")
 
         btns = tk.Frame(self, bg=CONTENT_BG)
-        btns.pack(fill="x", pady=(8, 12))
+        btns.pack(fill="x", pady=(0, 8))
         self.add_create_button(btns)
         outline_button(btns, "Ouvrir le fichier", self.open_selected_file, icon="document").pack(side="left")
         outline_button(btns, "Modifier", lambda: self.open_form(self._selected_id()), icon="edit").pack(side="left", padx=(8, 12))
@@ -5368,24 +5438,25 @@ class TypesPage(BasePage):
         self.header("Paramètres", "Types & Produits")
         tk.Label(self, text="Gérez ici les listes utilisées dans les menus déroulants ailleurs dans "
                              "l'application (catégories, marques, types de lentilles…).",
-                  font=FONT_BODY, bg=CONTENT_BG, fg=SLATE, wraplength=760, justify="left").pack(anchor="w", pady=(0, 16))
+                  font=FONT_BODY, bg=CONTENT_BG, fg=SLATE, wraplength=760, justify="left").pack(anchor="w", pady=(0, 8))
 
         btns = tk.Frame(self, bg=CONTENT_BG)
-        btns.pack(fill="x", pady=(8, 12))
+        btns.pack(fill="x", pady=(0, 8))
         self.add_create_button(btns)
         danger_button(btns, "Supprimer la sélection", self.delete_selected).pack(side="left")
 
         add_row = tk.Frame(self, bg=CONTENT_BG)
-        add_row.pack(fill="x", pady=(0, 12))
-        self.new_value_entry = tk.Entry(add_row, font=FONT_BODY, relief="solid", borderwidth=1,
-                                         bg=SURFACE, fg=TEXT, insertbackground=TEXT)
+        add_row.pack(fill="x", pady=(0, 8))
+        self.new_value_entry = tk.Entry(add_row, font=FONT_BODY, relief="flat", borderwidth=0,
+                                         bg=SURFACE, fg=TEXT, insertbackground=TEXT, highlightthickness=1,
+                                         highlightbackground=OUTLINE, highlightcolor=RED)
         self.new_value_entry.pack(side="left", fill="x", expand=True, ipady=6, padx=(0, 8))
         self.new_value_entry.bind("<Return>", lambda e: self.add_value())
         primary_button(add_row, "Ajouter", self.add_value, icon="plus").pack(side="left")
 
 
-        picker_row = tk.Frame(self, bg=CONTENT_BG)
-        picker_row.pack(fill="x", pady=(0, 12))
+        picker_row = tk.Frame(self.header_right, bg=CONTENT_BG)
+        picker_row.pack()
         tk.Label(picker_row, text="LISTE", font=FONT_MONO_SM, fg=SLATE, bg=CONTENT_BG).pack(side="left", padx=(0, 8))
         labels = [lbl for _key, lbl in TYPE_CATEGORIES]
         self.label_to_key = {lbl: key for key, lbl in TYPE_CATEGORIES}
@@ -5450,8 +5521,8 @@ class CommandesPage(BasePage):
         self.show_type = "client"
         self.header("Suivi", "Commandes", "+ Nouvelle commande", self.open_form)
 
-        toggle_row = tk.Frame(self, bg=CONTENT_BG)
-        toggle_row.pack(fill="x", pady=(0, 10))
+        toggle_row = tk.Frame(self.header_right, bg=CONTENT_BG)
+        toggle_row.pack()
         self.btn_client = self.mode_button(toggle_row, "Commandes clients", lambda: self.set_type("client"))
         self.btn_client.pack(side="left", padx=(0, 8))
         self.btn_fournisseur = self.mode_button(toggle_row, "Commandes fournisseur (stock)",
@@ -5461,7 +5532,7 @@ class CommandesPage(BasePage):
         self.search_var = self.make_search_box("Rechercher une commande…")
 
         btns = tk.Frame(self, bg=CONTENT_BG)
-        btns.pack(fill="x", pady=(8, 12))
+        btns.pack(fill="x", pady=(0, 8))
         self.add_create_button(btns)
         outline_button(btns, "Modifier la sélection", lambda: self.open_form(self._selected_id()), icon="edit").pack(side="left")
         self.tree = self.make_table(["Client / Fournisseur", "Description", "Commandée le",
@@ -5559,7 +5630,8 @@ class CommandesPage(BasePage):
         client_wrap = tk.Frame(body, bg=SURFACE)
         tk.Label(client_wrap, text="CLIENT", font=FONT_MONO_SM, fg=SLATE, bg=SURFACE, anchor="w").pack(fill="x", pady=(8, 2))
         client_var = tk.StringVar(value=current_name)
-        cb = SmartCombobox(client_wrap, textvariable=client_var, values=list(client_map.keys()), font=FONT_BODY)
+        cb = SmartCombobox(client_wrap, textvariable=client_var, values=list(client_map.keys()), font=FONT_BODY_B,
+                            item_font=FONT_BODY_B)
         cb.pack(fill="x", ipady=2)
 
         fournisseur_wrap = tk.Frame(body, bg=SURFACE)

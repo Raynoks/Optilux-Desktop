@@ -56,6 +56,19 @@ Contient le logo (`optilux_logo.png`) et l'icône de l'application
 le logo dans la barre latérale, sur l'écran de connexion, et l'icône de la
 fenêtre / barre des tâches (sous Windows).
 
+## Version 1.0.4
+
+- **Fiche client** : le « Prix après remise » est modifiable ; Reste = Après remise − Avance suit ce qui est
+  écrit. Modifier le Prix ou la Remise repart du calcul automatique ; vider le champ revient à l'automatique.
+  « Créer une vente » reprend ce total.
+- **Ventes** : nouvelle carte « Total crédit » avec les autres totaux (administrateur) ; colonne Client plus
+  large, colonne Remise réduite au strict nécessaire.
+- **Pages plus aérées** : les filtres (mois, bascules Charges/Personnelles, Commandes/Factures…) sont en
+  haut à droite, sur la ligne du titre ; espacements réduits pour agrandir les tableaux.
+- **Contours gris** doux au lieu de noirs (boutons, champs, listes, tableaux), en mode clair et sombre.
+- **Noms en gras** dans les fiches, les listes déroulantes de clients et le tableau de bord.
+- **Stock** : seuil d'alerte par défaut à 2.
+
 ## Version 1.0.3
 
 - **Ventes mensuelles** : la page Ventes affiche le mois en cours (menu ‹ Mois › pour revoir les mois
